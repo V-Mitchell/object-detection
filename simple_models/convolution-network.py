@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 
-from gc import callbacks
-import os
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.datasets import load_sample_image
