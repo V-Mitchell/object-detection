@@ -2,7 +2,6 @@
 
 from gc import callbacks
 import os
-import matplotlib as plt
 import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
