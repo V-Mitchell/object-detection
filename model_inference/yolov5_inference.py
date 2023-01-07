@@ -7,18 +7,18 @@ import numpy as np
 
 # parameters
 _FONT_FACE = cv2.FONT_HERSHEY_SIMPLEX
-_FONT_SCALE = 0.7
+_FONT_SCALE = 0.5
 _THICKNESS = 1
 _BLACK = (0,0,0)
 _RED = (255,0,0)
 
 # import model
-model = torch.hub.load("ultralytics/yolov5", "yolov5s", pretrained=True)
+model = torch.hub.load("ultralytics/yolov5", "yolov5x", pretrained=True)
 
 def draw_box_label(img, label, x1, y1, x2, y2):
     txt_size = cv2.getTextSize(label, _FONT_FACE, _FONT_SCALE, _THICKNESS)
     dim, baseline = txt_size[0], txt_size[1]
-    cv2.rectangle(img, (x1, y1), (x2, y2), _RED, cv2.LINE_8)
+    cv2.rectangle(img, (x1, y1), (x2, y2), _RED, cv2.LINE_4)
     cv2.putText(img, label, (x1, y1 + dim[1]), _FONT_FACE, _FONT_SCALE, _BLACK, _THICKNESS, cv2.LINE_AA)
 
 def overlay_bounding_boxes(img, results):
