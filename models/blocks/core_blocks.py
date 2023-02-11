@@ -1,7 +1,7 @@
 from typing import List
 from torch import nn
 from torch import Tensor
-from models.blocks.conv_bn_act import Conv2dBN, Conv2dBNReLU
+from models.blocks.conv import Conv2dModule
 from models.blocks.modules import SE2dModule, DilatedConvCatModule
 
 
@@ -12,34 +12,40 @@ class XBlock(nn.Module):
                  se_ratio: float) -> None:
         super(XBlock, self).__init__()
         base_channels = int(round(out_channels * bottleneck_ratio))
-        self.convbnrelu1 = Conv2dBNReLU(in_channels,
+        self.convbnrelu1 = Conv2dModule(in_channels,
                                         base_channels,
                                         kernel_size=1,
-                                        bias=False)
+                                        bias=False,
+                                        norm=nn.BatchNorm2d(base_channels),
+                                        act=nn.ReLU(inplace=True))
         n_groups = base_channels // group_w
-        self.convbnrelu2 = Conv2dBNReLU(base_channels,
+        self.convbnrelu2 = Conv2dModule(base_channels,
                                         base_channels,
                                         kernel_size=3,
                                         stride=stride,
                                         padding=1,
                                         groups=n_groups,
-                                        bias=False)
+                                        bias=False,
+                                        norm=nn.BatchNorm2d(base_channels),
+                                        act=nn.ReLU(inplace=True))
         self.with_se = se_ratio > 0
         if self.with_se:
             se_channels = int(round(in_channels * se_ratio))
             self.se = SE2dModule(base_channels, se_channels)
 
-        self.convbn3 = Conv2dBN(base_channels,
-                                out_channels,
-                                kernel_size=1,
-                                bias=False)
+        self.convbn3 = Conv2dModule(base_channels,
+                                    out_channels,
+                                    kernel_size=1,
+                                    bias=False,
+                                    norm=nn.BatchNorm2d(out_channels))
         self.act3 = nn.ReLU(inplace=True)
         if stride != 1 or in_channels != out_channels:
-            self.shortcut = Conv2dBN(in_channels,
-                                     out_channels,
-                                     kernel_size=1,
-                                     stride=stride,
-                                     bias=False)
+            self.shortcut = Conv2dModule(in_channels,
+                                         out_channels,
+                                         kernel_size=1,
+                                         stride=stride,
+                                         bias=False,
+                                         norm=nn.BatchNorm2d(out_channels))
         else:
             self.shortcut = None
 
@@ -59,32 +65,38 @@ class YBlock(nn.Module):
                  dilation: int, group_w: int) -> None:
         super(YBlock, self).__init__()
         groups = out_channels // group_w
-        self.convbnrelu1 = Conv2dBNReLU(in_channels,
+        self.convbnrelu1 = Conv2dModule(in_channels,
                                         out_channels,
                                         kernel_size=1,
-                                        bias=False)
-        self.convbnrelu2 = Conv2dBNReLU(out_channels,
+                                        bias=False,
+                                        norm=nn.BatchNorm2d(out_channels),
+                                        act=nn.ReLU(inplace=True))
+        self.convbnrelu2 = Conv2dModule(out_channels,
                                         out_channels,
                                         kernel_size=3,
                                         stride=stride,
                                         padding=dilation,
                                         dilation=dilation,
                                         groups=groups,
-                                        bias=False)
-        self.convbn3 = Conv2dBN(out_channels,
-                                out_channels,
-                                kernel_size=1,
-                                bias=False)
+                                        bias=False,
+                                        norm=nn.BatchNorm2d(out_channels),
+                                        act=nn.ReLU(inplace=True))
+        self.convbn3 = Conv2dModule(out_channels,
+                                    out_channels,
+                                    kernel_size=1,
+                                    bias=False,
+                                    norm=nn.BatchNorm2d(out_channels))
         self.act3 = nn.ReLU(inplace=True)
         self.se = SE2dModule(out_channels, in_channels // 4)
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.AvgPool2d(2, 2, ceil_mode=True),
-                Conv2dBN(in_channels,
-                         out_channels,
-                         kernel_size=1,
-                         stride=stride,
-                         bias=False))
+                Conv2dModule(in_channels,
+                             out_channels,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False,
+                             norm=nn.BatchNorm2d(out_channels)))
         else:
             self.shortcut = None
 
@@ -108,10 +120,12 @@ class DBlock(nn.Module):
                  attention: str = "se") -> None:
         super(DBlock, self).__init__()
         groups = out_channels // group_w
-        self.convbnrelu1 = Conv2dBNReLU(in_channels,
+        self.convbnrelu1 = Conv2dModule(in_channels,
                                         out_channels,
                                         kernel_size=1,
-                                        bias=False)
+                                        bias=False,
+                                        norm=nn.BatchNorm2d(out_channels),
+                                        act=nn.ReLU(inplace=True))
         if len(dilations) == 1:
             dilation = dilations[0]
             conv2 = nn.Conv2d(out_channels,
@@ -131,10 +145,11 @@ class DBlock(nn.Module):
 
         self.convbnrelu2 = nn.Sequential(conv2, nn.BatchNorm2d(out_channels),
                                          nn.ReLU(inplace=True))
-        self.convbn3 = Conv2dBN(out_channels,
-                                out_channels,
-                                kernel_size=1,
-                                bias=False)
+        self.convbn3 = Conv2dModule(out_channels,
+                                    out_channels,
+                                    kernel_size=1,
+                                    bias=False,
+                                    norm=nn.BatchNorm2d(out_channels))
         self.act3 = nn.ReLU(inplace=True)
         if attention == "se":
             self.se = SE2dModule(out_channels, in_channels // 4)
@@ -146,11 +161,12 @@ class DBlock(nn.Module):
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.AvgPool2d(2, 2, ceil_mode=True),
-                Conv2dBN(in_channels,
-                         out_channels,
-                         kernel_size=1,
-                         stride=stride,
-                         bias=False))
+                Conv2dModule(in_channels,
+                             out_channels,
+                             kernel_size=1,
+                             stride=stride,
+                             bias=False,
+                             norm=nn.BatchNorm2d(out_channels)))
         else:
             self.shortcut = None
 
