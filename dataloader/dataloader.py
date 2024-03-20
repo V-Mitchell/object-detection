@@ -42,7 +42,7 @@ class YoloDataset(Dataset):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Splitting coco labels into yolo format.")
+    parser = argparse.ArgumentParser(description="Testing dataloaders")
     parser.add_argument('-d', '--dataset', required=True)
     parser.add_argument('-v', '--visualize', type=bool, action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
@@ -59,4 +59,3 @@ if __name__ == "__main__":
 
         if i == 9:
             break
-    print("Dataloader Length", len(dataloader))
