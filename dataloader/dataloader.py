@@ -33,11 +33,8 @@ class YoloDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, index):
-        image_path = self.image_paths[index]
-        label_path = self.label_paths[index]
-        print(image_path,"-",label_path)
-        image = read_image(image_path)
-        labels = self.loadLabels(label_path)
+        image = read_image(self.image_paths[index])
+        labels = self.loadLabels(self.label_paths[index])
         return (image, labels)
 
 

@@ -25,6 +25,7 @@ def draw_object_labels(save_path, img, classes, bboxs, polygons=None):
         top_left = (int((bbox[0] - bbox[2]/2) * w), int((bbox[1] - bbox[3]/2) * h))
         bottom_right = (int((bbox[0] + bbox[2]/2) * w), int((bbox[1] + bbox[3]/2) * h))
         cv2.rectangle(cv_img, top_left, bottom_right, (255, 0, 0), 1)
+        cv2.putText(cv_img, str(cls), top_left, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, 2)
     
     print("Saving", save_path)
     cv2.imwrite(save_path, cv_img)
