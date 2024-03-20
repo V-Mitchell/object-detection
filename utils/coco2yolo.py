@@ -46,9 +46,8 @@ def merge_segments(segments):
                     s.append(segments[i][nidx:])
     return s
 
-def convert_split(labels_path, json_file, split_folder, polygons=False):
-    labels_json_path = os.path.join(labels_path, json_file)
-    with open(labels_json_path) as stream:
+def convert_split(json_path, polygons=False):
+    with open(json_path) as stream:
         labels_json = json.load(stream)
     
     image_metadata = {}
@@ -58,19 +57,19 @@ def convert_split(labels_path, json_file, split_folder, polygons=False):
         image_labels[str(image_data["id"])] = []
     
     for label_data in labels_json["annotations"]:
-        wh = [image_metadata[str(label_data["image_id"])]["width"],
-              image_metadata[str(label_data["image_id"])]["height"]]
+        width = image_metadata[str(label_data["image_id"])]["width"]
+        height = image_metadata[str(label_data["image_id"])]["height"]
         label_string = str(label_data["category_id"]) 
-        for i, x in enumerate(label_data["bbox"]):
-            label_string += " " + str(x / wh[i % 2])
+        bbox = label_data["bbox"]
+        label_string += " " + str((bbox[0] + bbox[2] / 2) / width) + " " + str((bbox[1] + bbox[3] / 2) / height) + " " + str(bbox[2] / width) + " " + str(bbox[3] / height)
         if polygons:
             segments = merge_segments(label_data["segmentation"])
         image_labels[str(label_data["image_id"])].append(label_string)
     
-    split_path = os.path.join(labels_path, split_folder)
-    os.makedirs(split_path, exist_ok=True)
+    save_path = os.path.join(os.path.dirname(json_path), "yolo_labels")
+    os.makedirs(save_path, exist_ok=True)
     for id, label_strs in image_labels.items():
-        label_file_path = os.path.join(split_path, os.path.splitext(image_metadata[id]["file_name"])[0] + ".txt")
+        label_file_path = os.path.join(save_path, os.path.splitext(image_metadata[id]["file_name"])[0] + ".txt")
         file_string = ""
         for inst_str in label_strs:
             file_string += inst_str + "\n"
@@ -78,17 +77,13 @@ def convert_split(labels_path, json_file, split_folder, polygons=False):
             stream.write(file_string)
 
 
-def coco2yolo(dataset_path, polygons=False):
-    labels_path = os.path.join(dataset_path, "labels/")
-    convert_split(labels_path, "instances_val2017.json", "val", polygons)
-    convert_split(labels_path, "instances_train2017.json", "train", polygons)
-
-
+def coco2yolo(json_path, polygons=False):
+    convert_split(json_path, polygons)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Splitting coco labels into yolo format.")
-    parser.add_argument('-d', '--dataset', required=True)
+    parser = argparse.ArgumentParser(description="Splitting/Converting coco labels into yolo format.")
+    parser.add_argument('-f', '--jsonpath', required=True)
     parser.add_argument('-p', '--polygons', type=bool, action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
-    coco2yolo(args.dataset, args.polygons)
+    coco2yolo(args.jsonpath, args.polygons)
