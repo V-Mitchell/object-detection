@@ -2,6 +2,8 @@ import os
 import argparse
 import json
 import numpy as np
+import pycocotools.mask as mask
+import cv2
 
 def min_index(arr1, arr2):
     dis = ((arr1[:, None, :] - arr2[None, :, :]) ** 2).sum(-1)
@@ -46,7 +48,20 @@ def merge_segments(segments):
                     s.append(segments[i][nidx:])
     return s
 
-def convert_split(json_path, polygons=False):
+def rle2segments(rle):
+    segmentation = mask.frPyObjects(rle, rle["size"][0], rle["size"][1])
+    maskArray = mask.decode(segmentation)
+    contours, _ = cv2.findContours(maskArray, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    segments = []
+    for contour in contours:
+        if contour.size >= 0:
+            segment = np.array(contour).flatten()
+            segments.append(segment.tolist())
+    
+    return segments
+
+def coco2yolo(json_path):
     with open(json_path) as stream:
         labels_json = json.load(stream)
     
@@ -57,13 +72,27 @@ def convert_split(json_path, polygons=False):
         image_labels[str(image_data["id"])] = []
     
     for label_data in labels_json["annotations"]:
-        width = image_metadata[str(label_data["image_id"])]["width"]
-        height = image_metadata[str(label_data["image_id"])]["height"]
+        wh = [image_metadata[str(label_data["image_id"])]["width"],
+              image_metadata[str(label_data["image_id"])]["height"]]
         label_string = str(label_data["category_id"]) 
         bbox = label_data["bbox"]
-        label_string += " " + str((bbox[0] + bbox[2] / 2) / width) + " " + str((bbox[1] + bbox[3] / 2) / height) + " " + str(bbox[2] / width) + " " + str(bbox[3] / height)
-        if polygons:
-            segments = merge_segments(label_data["segmentation"])
+        label_string += " " + str((bbox[0] + bbox[2] / 2) / wh[0]) + " " + str((bbox[1] + bbox[3] / 2) / wh[1]) + " " + str(bbox[2] / wh[0]) + " " + str(bbox[3] / wh[1])
+
+        if label_data["iscrowd"]:
+            segmentation = rle2segments(label_data["segmentation"])
+        else:
+            segmentation = label_data["segmentation"]
+
+        if len(segmentation) > 1:
+            segment = []
+            for x in merge_segments(segmentation):
+                segment.extend(x.flatten().tolist())
+        else:
+            segment = segmentation[0]
+
+        for i, x in enumerate(segment):
+            label_string += " " + str(x / wh[i%2])
+        
         image_labels[str(label_data["image_id"])].append(label_string)
     
     save_path = os.path.join(os.path.dirname(json_path), "yolo_labels")
@@ -77,13 +106,8 @@ def convert_split(json_path, polygons=False):
             stream.write(file_string)
 
 
-def coco2yolo(json_path, polygons=False):
-    convert_split(json_path, polygons)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Splitting/Converting coco labels into yolo format.")
     parser.add_argument('-f', '--jsonpath', required=True)
-    parser.add_argument('-p', '--polygons', type=bool, action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
-    coco2yolo(args.jsonpath, args.polygons)
+    coco2yolo(args.jsonpath)
