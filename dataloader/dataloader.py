@@ -43,7 +43,9 @@ class YoloDataset(Dataset):
             x, y, w, h = map(float, label_split[1:5])
             object_bboxs.append([x, y, w, h])
             object_mask.append(xyxy2Mask([x for x in map(float, label_split[5:])], width, height))
-        labels =  (torch.Tensor(object_classes).int(), torch.Tensor(object_bboxs).float(), torch.Tensor(np.array(object_mask)).float())
+        labels =  (torch.Tensor(object_classes).to(torch.int32),
+                   torch.Tensor(object_bboxs).to(torch.float32),
+                   torch.Tensor(np.array(object_mask)).to(torch.int8))
         return (image, labels)
 
 
