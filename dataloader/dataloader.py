@@ -9,12 +9,12 @@ import cv2
 from utils.visualize_labels import draw_object_labels
 
 def xyxy2Mask(xyxy, width, height):
-    wh = [width, height]
+    wh = [height, width]
     xyxy_points = []
     for i, x in enumerate(xyxy):
         xyxy_points.append(int(x * wh[i%2]))
     points = np.array(xyxy_points).reshape((-1, 2))
-    mask = np.zeros((width,height, 1), np.uint8)
+    mask = np.zeros((width, height), np.uint8)
     cv2.fillConvexPoly(mask, points, (255))
     return mask
 
