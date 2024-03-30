@@ -1,12 +1,9 @@
 import os
-import argparse
-import uuid
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision.io import read_image
 import numpy as np
 import cv2
-from utils.visualize_labels import draw_object_labels
 
 def xyxy2Mask(xyxy, width, height):
     wh = [height, width]
@@ -55,8 +52,24 @@ class YoloDataset(Dataset):
     def __getitem__(self, index):
         return self.loadData(self.image_paths[index], self.label_paths[index])
 
+DATASETS = {"YoloDataset": YoloDataset}
+
+def get_dataloader(cfg):
+    return DataLoader(DATASETS[cfg["dataset"]](cfg["dataset"]["path"]),
+                      cfg["batch_size"],
+                      cfg["shuffle"],
+                      num_workers=cfg["num_workers"],
+                      pin_memory=cfg["pin_memory"],
+                      drop_last=cfg["drop_last"], 
+                      persistent_workers=cfg["persistent_workers"])
+
 
 if __name__ == "__main__":
+    import argparse
+    import uuid
+    from utils.visualize_labels import draw_object_labels
+    from torch.utils.data import DataLoader
+
     parser = argparse.ArgumentParser(description="Testing dataloaders")
     parser.add_argument('-d', '--dataset', required=True)
     parser.add_argument('-v', '--visualize', type=bool, action=argparse.BooleanOptionalAction, default=False)
@@ -69,7 +82,6 @@ if __name__ == "__main__":
     for i, data in enumerate(dataloader):
         image, labels = data
         classes, bboxs, masks = labels
-        print(classes.shape, bboxs.shape, masks.shape)
         if args.visualize:
             save_path = os.path.join("results", uuid.uuid4().hex + ".jpg")
             draw_object_labels(save_path, image[0], classes[0], bboxs[0], masks[0])
