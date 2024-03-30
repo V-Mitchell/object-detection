@@ -19,9 +19,9 @@ class Bottleneck(nn.Module):
 
         self.downsample = None
         if first_block:
-            self.downsample = nn.Sequential(nn.Conv2d(in_channels, out_channels*self.expansion, 1, stride, 0)
-                                            , nn.BatchNorm2d(out_channels*self.expansion))
-    
+            self.downsample = nn.Sequential(nn.Conv2d(in_channels, out_channels*self.expansion, 1, stride, 0),
+                                            nn.BatchNorm2d(out_channels*self.expansion))
+
     def forward(self, x):
         identity = x.clone()
         x = self.relu(self.bn0(self.conv0(x)))
@@ -30,10 +30,40 @@ class Bottleneck(nn.Module):
 
         if self.downsample:
             identity = self.downsample(identity)
-        
+
         x += identity
         x = self.relu(x)
 
+        return x
+
+class Block(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_channels, out_channels, stride=1, first_block=False):
+        super().__init__()
+
+        self.conv0 = nn.Conv2d(in_channels, out_channels, 3, stride, 1)
+        self.bn0 = nn.BatchNorm2d(out_channels)
+
+        self.conv1 = nn.Conv2d(out_channels, out_channels, 3, 1, 1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+
+        self.relu = nn.ReLU(inplace=True)
+
+        self.downsample = None
+        if first_block:
+            self.downsample = nn.Sequential(nn.Conv2d(in_channels, out_channels, 1, stride, 0),
+                                            nn.BatchNorm2d(out_channels))
+
+    def forward(self, x):
+        identity = x.clone()
+        x = self.relu(self.bn0(self.conv0(x)))
+        x = self.bn1(self.conv1(x))
+
+        if self.downsample:
+            identity = self.downsample(identity)
+
+        x += identity
         return x
 
 
@@ -75,4 +105,18 @@ class ResNet(nn.Module):
 
         return (f1, f2, f3, f4)
 
-BLOCKS = {"Bottleneck": Bottleneck}
+def ResNet18(in_channels, out_channels_list):
+    return ResNet(Block, [2,2,2,2], out_channels_list, in_channels)
+
+def ResNet34(in_channels, out_channels_list):
+    return ResNet(Block, [3,4,6,3], out_channels_list, in_channels)
+
+def ResNet50(in_channels, out_channels_list):
+    return ResNet(Bottleneck, [3,4,6,3], out_channels_list, in_channels)
+
+def ResNet101(in_channels, out_channels_list):
+    return ResNet(Bottleneck, [3,4,23,3], out_channels_list, in_channels)
+
+def ResNet152(in_channels, out_channels_list):
+    return ResNet(Bottleneck, [3,8,36,3], out_channels_list, in_channels)
+
