@@ -2,7 +2,21 @@ from typing import List, Dict
 from torch import nn
 from torch import Tensor
 import torch.nn.functional as F
+from torchvision.ops import FeaturePyramidNetwork
 from models.blocks.core_blocks import Conv2dModule
+
+
+class PytorchFPN(nn.Module):
+    def __init__(self, in_channels_list, out_channels):
+        super().__init__()
+
+        self.fpn = FeaturePyramidNetwork(in_channels_list, out_channels)
+    
+    def forward(self, x):
+        feats = {} # {"f0":x[0], "f1": x[1], "f2": x[2], "f3": x[3]}
+        for i, feat in enumerate(x):
+            feats["f" + str(i)] = x[i]
+        return self.fpn(feats)
 
 
 class FPN(nn.Module):
