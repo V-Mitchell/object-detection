@@ -1,9 +1,6 @@
-from typing import List, Dict
 from torch import nn
-from torch import Tensor
 import torch.nn.functional as F
 from torchvision.ops import FeaturePyramidNetwork
-from models.blocks.core_blocks import Conv2dModule
 
 
 class PytorchFPN(nn.Module):
@@ -23,8 +20,7 @@ class PytorchFPN(nn.Module):
 
 class FPN(nn.Module):
 
-    def __init__(
-        self, cfg):
+    def __init__(self, cfg):
         super(FPN, self).__init__()
         in_channels_list = cfg["in_channels_list"]
         out_channels = cfg["out_channels"]
