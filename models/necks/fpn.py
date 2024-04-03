@@ -31,7 +31,7 @@ class FPN(nn.Module):
 
         self.num_inputs = len(in_channels_list)
         for i in range(self.num_inputs):
-            l_conv = nn.Sequential(nn.Conv2d(in_channels_list[i], out_channels, 1))
+            l_conv = nn.Sequential(nn.Conv2d(in_channels_list[i], out_channels, 1, padding=1))
             if not no_norm_on_lateral:
                 l_conv.append(nn.BatchNorm2d(out_channels))
             l_conv.append(nn.ReLU())
