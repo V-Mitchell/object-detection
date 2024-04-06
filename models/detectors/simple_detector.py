@@ -11,10 +11,11 @@ class SimpleDetector(nn.Module):
         self.head = get_head(cfg["head"])
 
     def forward(self, x):
-        feats = self.backbone(x) # returns tuple(fx)
-        feats = self.neck(feats) # returns dict(fx)
-        preds = self.head(feats) # returns dict(fx)
-        return preds
+        feats = self.backbone(x)
+        feats = self.neck(feats)
+        preds = self.head(feats)
+        pred_results = self.head.decode_predictions(preds[0], preds[1])
+        return pred_results
 
 if __name__ == "__main__":
     with open("./cfg/simple_detector.yaml") as stream:
@@ -24,10 +25,5 @@ if __name__ == "__main__":
 
     x = torch.ones([1, 3, 600, 600])
     out = detector(x)
-    cls_preds, bbox_preds = out
-    print("Class Preds")
-    for x in cls_preds:
-        print(x.shape)
-    print("BBox Preds")
-    for x in bbox_preds:
-        print(x.shape)
+    for k, v in out.items():
+        print(k, v.shape)

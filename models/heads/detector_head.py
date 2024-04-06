@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 class DetectorHead(nn.Module):
@@ -5,8 +6,8 @@ class DetectorHead(nn.Module):
         super().__init__()
         in_channels = cfg["in_channels"]
         num_layers = cfg["num_layers"]
-        num_classes = cfg["num_classes"]
-        num_priors = cfg["num_priors"]
+        self.num_classes = cfg["num_classes"]
+        self.num_priors = cfg["num_priors"]
 
         cls_layers = []
         bbox_layers = []
@@ -14,8 +15,8 @@ class DetectorHead(nn.Module):
             cls_layers.append(nn.Conv2d(in_channels, in_channels, 3, 1, 1))
             bbox_layers.append(nn.Conv2d(in_channels, in_channels, 3, 1, 1))
 
-        self.cls_layers = nn.Sequential(*cls_layers, nn.Conv2d(in_channels, num_priors * num_classes, 3, 1, 1))
-        self.bbox_layers = nn.Sequential(*bbox_layers, nn.Conv2d(in_channels, num_priors * 4, 3, 1, 1))
+        self.cls_layers = nn.Sequential(*cls_layers, nn.Conv2d(in_channels, self.num_priors * self.num_classes, 3, 1, 1))
+        self.bbox_layers = nn.Sequential(*bbox_layers, nn.Conv2d(in_channels, self.num_priors * 4, 3, 1, 1))
     
     def forward(self, x):
 
@@ -27,10 +28,13 @@ class DetectorHead(nn.Module):
         
         return (cls_preds, bbox_preds)
 
-def compute_head_loss(preds, labels):
-    pass
-    # use cross entropy for class loss
-
-    # loss for bbox
-    
-    # loss for mask
+    def decode_predictions(self, cls_preds, bbox_preds):
+        cls_process = []
+        bbox_process = []
+        for cls_pred, bbox_pred in zip(cls_preds, bbox_preds):
+            cls_process.append(cls_pred.squeeze().permute(1, 2, 0).reshape(-1, self.num_classes))
+            bbox_process.append(bbox_pred.squeeze().permute(1, 2, 0).reshape(-1, 4))
+        return {
+            "cls_preds": torch.cat(cls_process),
+            "bbox_preds": torch.cat(bbox_process)
+        }
