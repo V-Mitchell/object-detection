@@ -1,5 +1,15 @@
 import os
 import torch
+from torch.utils.tensorboard.writer import SummaryWriter
+
+class TensorboardLogger():
+    def __init__(self, log_path):
+        self.writer = SummaryWriter(log_path)
+
+    def log_dict(self, data_dict, step):
+        for k, v in data_dict.items():
+            self.writer.add_scalar(k, v, step)
+
 
 def get_device(device="", batch_size=0, newline=True):
     s = f"torch-{torch.__version__} "
@@ -11,7 +21,7 @@ def get_device(device="", batch_size=0, newline=True):
         os.environ["CUDA_VISIBLE_DEVICES"] = device  # set environment variable - must be before assert is_available()
         assert torch.cuda.is_available() and torch.cuda.device_count() >= len(
             device.replace(",", "")
-        ), f"Invalid CUDA '--device {device}' requested, use CPU or pass valid CUDA device(s)"
+        ), f"Invalid CUDA 'device: {device}' requested, use CPU or pass valid CUDA device(s)"
 
     if not cpu and torch.cuda.is_available():  # prefer GPU if available
         devices = device.split(",") if device else "0"  # range(torch.cuda.device_count())  # i.e. 0,1,6,7
@@ -30,3 +40,6 @@ def get_device(device="", batch_size=0, newline=True):
     if not newline:
         s = s.rstrip()
     return torch.device(arg)
+
+def save_ckpt(epoch, model):
+    pass
