@@ -39,7 +39,11 @@ def get_device(device="", batch_size=0, newline=True):
 
     if not newline:
         s = s.rstrip()
+    print(s)
     return torch.device(arg)
 
 def save_ckpt(epoch, model):
+    pass
+
+def get_log_path():
     pass
