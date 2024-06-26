@@ -17,8 +17,13 @@ def xyxy2Mask(xyxy, width, height):
 
 
 class YoloDataset(Dataset):
-    def __init__(self, dataset_path, test = False):
+    def __init__(self, dataset_path, validation = False):
         super().__init__()
+        if validation:
+            dataset_path = os.path.join(dataset_path, "val/")
+        else:
+            dataset_path = os.path.join(dataset_path, "train/")
+
         self.images_path = os.path.join(dataset_path, "images/")
         self.labels_path = os.path.join(dataset_path, "labels/")
 
@@ -54,8 +59,8 @@ class YoloDataset(Dataset):
 
 DATASETS = {"YoloDataset": YoloDataset}
 
-def get_dataloader(cfg):
-    return DataLoader(DATASETS[cfg["dataset"]](cfg["dataset"]["path"]),
+def get_dataloader(cfg, validation = False):
+    return DataLoader(DATASETS[cfg["dataset"]](cfg["dataset_path"], validation),
                       cfg["batch_size"],
                       cfg["shuffle"],
                       num_workers=cfg["num_workers"],
@@ -72,10 +77,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Testing dataloaders")
     parser.add_argument('-d', '--dataset', required=True)
+    parser.add_argument('-val', '--validation', type=bool, action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('-v', '--visualize', type=bool, action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('-n', '--num_labels', default=10)
     args = parser.parse_args()
-    dataset = YoloDataset(args.dataset)
+    dataset = YoloDataset(args.dataset, args.validation)
     dataloader = DataLoader(dataset)
     if args.visualize:
         os.makedirs("results/", exist_ok=True)
