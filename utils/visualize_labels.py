@@ -33,6 +33,13 @@ def draw_object_labels(save_path, img, classes, bboxs, masks):
     print("Saving", save_path)
     cv2.imwrite(save_path, cv_img)
 
+def save_image(save_path, img):
+    cv_img = img.numpy()
+    cv_img = np.transpose(cv_img, (1,2,0))
+    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+    print("Saving", save_path)
+    cv2.imwrite(save_path, cv_img)
+
 
 if __name__ == "__main__":
     pass
