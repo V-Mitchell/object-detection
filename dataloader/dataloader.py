@@ -2,6 +2,7 @@ import os
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision.io import read_image
+from torchvision.transforms.functional import resize
 import numpy as np
 import cv2
 
@@ -16,9 +17,54 @@ def xyxy2Mask(xyxy, width, height):
     return mask
 
 
+def padded_resize(image, bbox, mask, size, padded_size, color = (255, 255, 255)):
+    resized_image = resize(image, size)
+    n, c, height, width = resized_image.shape
+    padded_height, padded_width = padded_size
+    if height == padded_height:
+        pad_pixels = int((padded_width - width) / 2)
+        odd_pixel = 0 if width + pad_pixels * 2 == padded_width else 1
+        left_pad = torch.zeros((n, c, padded_height, pad_pixels + odd_pixel), dtype=image.dtype)
+        right_pad = torch.zeros((n, c, padded_height, pad_pixels), dtype=image.dtype)
+        for i in range(3):
+            left_pad[:,i,:,:] = color[i]
+            right_pad[:,i,:,:] = color[i]
+        padded_image = torch.cat((left_pad, resized_image, right_pad), dim=-1)
+    else:
+        pad_pixels = int((padded_height - height) / 2)
+        odd_pixel = 0 if height + pad_pixels * 2 == padded_height else 1
+        top_pad = torch.zeros((n, c, pad_pixels + odd_pixel, padded_width), dtype=image.dtype)
+        bottom_pad = torch.zeros((n, c, pad_pixels, padded_width), dtype=image.dtype)
+        for i in range(3):
+            top_pad[:,i,:,:] = color[i]
+            bottom_pad[:,i,:,:] = color[i]
+        padded_image = torch.cat((top_pad, resized_image, bottom_pad), dim=-2)
+    
+    return padded_image, bbox, mask
+
+
+def letterbox(image, bbox, mask, letter_size):
+    _, _, height, width = image.shape
+    image_ar = float(width) / height
+    letter_height, letter_width = letter_size
+    letter_ar = float(letter_width) / letter_height
+    if letter_ar > image_ar:
+        ratio = float(letter_height) / height
+        new_height = letter_height
+        new_width = int(width * ratio)
+    else:
+        ratio = float(letter_width) / width
+        new_height = int(height * ratio)
+        new_width = letter_width
+
+    return padded_resize(image, bbox, mask, [new_height, new_width], [letter_height, letter_width])
+
+
+
 class YoloDataset(Dataset):
-    def __init__(self, dataset_path, validation = False):
+    def __init__(self, dataset_path, input_size, validation = False):
         super().__init__()
+        self.input_size = input_size
         if validation:
             dataset_path = os.path.join(dataset_path, "val/")
         else:
@@ -49,7 +95,9 @@ class YoloDataset(Dataset):
                    torch.Tensor(object_bboxs).to(torch.float32),
                    torch.Tensor(np.array(object_mask)).to(torch.int8))
         return (image, labels)
-
+    
+    def collate_fn(batch):
+        pass
 
     def __len__(self):
         return len(self.image_paths)
@@ -60,10 +108,12 @@ class YoloDataset(Dataset):
 DATASETS = {"YoloDataset": YoloDataset}
 
 def get_dataloader(cfg, validation = False):
-    return DataLoader(DATASETS[cfg["dataset"]](cfg["dataset_path"], validation),
+    dataset = DATASETS[cfg["dataset"]](cfg["dataset_path"], cfg["input_size"], validation)
+    return DataLoader(dataset,
                       cfg["batch_size"],
                       cfg["shuffle"],
                       num_workers=cfg["num_workers"],
+                      collate_fn=dataset.collate_fn,
                       pin_memory=cfg["pin_memory"],
                       drop_last=cfg["drop_last"], 
                       persistent_workers=cfg["persistent_workers"])
@@ -72,7 +122,7 @@ def get_dataloader(cfg, validation = False):
 if __name__ == "__main__":
     import argparse
     import uuid
-    from utils.visualize_labels import draw_object_labels
+    from utils.visualize_labels import draw_object_labels, save_image
     from torch.utils.data import DataLoader
 
     parser = argparse.ArgumentParser(description="Testing dataloaders")
@@ -80,8 +130,10 @@ if __name__ == "__main__":
     parser.add_argument('-val', '--validation', type=bool, action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('-v', '--visualize', type=bool, action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('-n', '--num_labels', default=10)
+    parser.add_argument('--width', default=640)
+    parser.add_argument('--height', default=640)
     args = parser.parse_args()
-    dataset = YoloDataset(args.dataset, args.validation)
+    dataset = YoloDataset(args.dataset, [args.height, args.width], args.validation)
     dataloader = DataLoader(dataset)
     if args.visualize:
         os.makedirs("results/", exist_ok=True)
