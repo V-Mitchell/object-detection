@@ -16,35 +16,8 @@ def xyxy2Mask(xyxy, width, height):
     cv2.fillConvexPoly(mask, points, (255))
     return mask
 
-
-def padded_resize(image, bbox, mask, size, padded_size, color = (255, 255, 255)):
-    resized_image = resize(image, size)
-    n, c, height, width = resized_image.shape
-    padded_height, padded_width = padded_size
-    if height == padded_height:
-        pad_pixels = int((padded_width - width) / 2)
-        odd_pixel = 0 if width + pad_pixels * 2 == padded_width else 1
-        left_pad = torch.zeros((n, c, padded_height, pad_pixels + odd_pixel), dtype=image.dtype)
-        right_pad = torch.zeros((n, c, padded_height, pad_pixels), dtype=image.dtype)
-        for i in range(3):
-            left_pad[:,i,:,:] = color[i]
-            right_pad[:,i,:,:] = color[i]
-        padded_image = torch.cat((left_pad, resized_image, right_pad), dim=-1)
-    else:
-        pad_pixels = int((padded_height - height) / 2)
-        odd_pixel = 0 if height + pad_pixels * 2 == padded_height else 1
-        top_pad = torch.zeros((n, c, pad_pixels + odd_pixel, padded_width), dtype=image.dtype)
-        bottom_pad = torch.zeros((n, c, pad_pixels, padded_width), dtype=image.dtype)
-        for i in range(3):
-            top_pad[:,i,:,:] = color[i]
-            bottom_pad[:,i,:,:] = color[i]
-        padded_image = torch.cat((top_pad, resized_image, bottom_pad), dim=-2)
-    
-    return padded_image, bbox, mask
-
-
-def letterbox(image, bbox, mask, letter_size):
-    _, _, height, width = image.shape
+def letterbox(image, bbox, mask, letter_size, color = (255, 255, 255)):
+    _, height, width = image.shape
     image_ar = float(width) / height
     letter_height, letter_width = letter_size
     letter_ar = float(letter_width) / letter_height
@@ -56,8 +29,42 @@ def letterbox(image, bbox, mask, letter_size):
         ratio = float(letter_width) / width
         new_height = int(height * ratio)
         new_width = letter_width
+    
+    resized_image = resize(image, [new_height, new_width])
+    resized_mask = resize(mask, [new_height, new_width])
 
-    return padded_resize(image, bbox, mask, [new_height, new_width], [letter_height, letter_width])
+    c, height, width = resized_image.shape
+    l, _, _ = resized_mask.shape
+    if height == letter_height:
+        pad_pixels = int((letter_width - width) / 2)
+        odd_pixel = 0 if width + pad_pixels * 2 == letter_width else 1
+        left_img_pad = torch.zeros((c, letter_height, pad_pixels + odd_pixel), dtype=image.dtype)
+        right_img_pad = torch.zeros((c, letter_height, pad_pixels), dtype=image.dtype)
+        left_mask_pad = torch.zeros((l, letter_height, pad_pixels + odd_pixel), dtype=mask.dtype)
+        right_mask_pad = torch.zeros((l, letter_height, pad_pixels), dtype=mask.dtype)
+        for i in range(c):
+            left_img_pad[i,:,:] = color[i]
+            right_img_pad[i,:,:] = color[i]
+        padded_image = torch.cat((left_img_pad, resized_image, right_img_pad), dim=-1)
+        padded_mask = torch.cat((left_mask_pad, resized_mask, right_mask_pad), dim=-1)
+        bbox[:,0] = ((bbox[:,0] * new_width) + pad_pixels) / letter_width
+        bbox[:,2] = (bbox[:, 2] * new_width) / letter_width
+    else:
+        pad_pixels = int((letter_height - height) / 2)
+        odd_pixel = 0 if height + pad_pixels * 2 == letter_height else 1
+        top_img_pad = torch.zeros((c, pad_pixels + odd_pixel, letter_width), dtype=image.dtype)
+        bottom_img_pad = torch.zeros((c, pad_pixels, letter_width), dtype=image.dtype)
+        top_mask_pad = torch.zeros((l, pad_pixels + odd_pixel, letter_width), dtype=mask.dtype)
+        bottom_mask_pad = torch.zeros((l, pad_pixels, letter_width), dtype=mask.dtype)
+        for i in range(3):
+            top_img_pad[i,:,:] = color[i]
+            bottom_img_pad[i,:,:] = color[i]
+        padded_image = torch.cat((top_img_pad, resized_image, bottom_img_pad), dim=-2)
+        padded_mask = torch.cat((top_mask_pad, resized_mask, bottom_mask_pad), dim=-2)
+        bbox[:,1] = ((bbox[:,1] * new_height) + pad_pixels) / letter_height
+        bbox[:,3] = (bbox[:,3] * new_height) / letter_height
+
+    return padded_image, bbox, padded_mask
 
 
 
@@ -96,8 +103,22 @@ class YoloDataset(Dataset):
                    torch.Tensor(np.array(object_mask)).to(torch.int8))
         return (image, labels)
     
-    def collate_fn(batch):
-        pass
+    def collate_fn(self, batch):
+        batch_images = []
+        batch_classes = []
+        batch_bboxs = []
+        batch_masks =[]
+        for x in batch:
+            image, labels = x
+            classes, bboxs, masks = labels
+            image, bboxs, masks = letterbox(image, bboxs, masks, self.input_size)
+            batch_images.append(image.unsqueeze(dim=0))
+            batch_classes.append(classes)
+            batch_bboxs.append(bboxs)
+            batch_masks.append(masks)
+        batch_images = torch.cat(batch_images, dim=0)
+        labels = (batch_classes, batch_bboxs, batch_masks)
+        return (batch_images, labels)
 
     def __len__(self):
         return len(self.image_paths)
@@ -122,7 +143,7 @@ def get_dataloader(cfg, validation = False):
 if __name__ == "__main__":
     import argparse
     import uuid
-    from utils.visualize_labels import draw_object_labels, save_image
+    from utils.visualize_labels import draw_object_labels
     from torch.utils.data import DataLoader
 
     parser = argparse.ArgumentParser(description="Testing dataloaders")
@@ -134,7 +155,7 @@ if __name__ == "__main__":
     parser.add_argument('--height', default=640)
     args = parser.parse_args()
     dataset = YoloDataset(args.dataset, [args.height, args.width], args.validation)
-    dataloader = DataLoader(dataset)
+    dataloader = DataLoader(dataset, batch_size=1, collate_fn=dataset.collate_fn)
     if args.visualize:
         os.makedirs("results/", exist_ok=True)
     for i, data in enumerate(dataloader):
