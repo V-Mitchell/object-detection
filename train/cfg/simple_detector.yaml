@@ -1,0 +1,32 @@
+model:
+  backbone:
+    network: "ResNet50"
+    out_channels_list: [64, 128, 256, 512]
+  neck:
+    network: "PAFPN"
+    in_channels_list: [256, 512, 1024, 2048]
+    out_channels: 256
+    no_norm_on_lateral: False
+  head:
+    network: "DetectorHead"
+    in_channels: 256
+    num_layers: 3
+    num_classes: 80
+    num_priors: 256
+
+dataloader:
+  dataset: "YoloDataset"
+  dataset_path: "/home/lorrentz/DATA/coco/"
+  input_size: [640, 640]
+  batch_size: 8
+  shuffle: True
+  num_workers: 4
+  pin_memory: False
+  drop_last: True
+  persistent_workers: False
+
+training:
+  epochs: 50
+  validate_period: 
+  device: 0
+  optimizer: "Adam"
