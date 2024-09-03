@@ -1,7 +1,7 @@
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchvision.io import read_image
+from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.functional import resize
 import numpy as np
 import cv2
@@ -31,38 +31,47 @@ def letterbox(image, bbox, mask, letter_size, color = (255, 255, 255)):
         new_width = letter_width
     
     resized_image = resize(image, [new_height, new_width])
-    resized_mask = resize(mask, [new_height, new_width])
+    process_labels = mask.numel() > 0
+    if process_labels:
+        resized_mask = resize(mask, [new_height, new_width])
 
     c, height, width = resized_image.shape
-    l, _, _ = resized_mask.shape
+    if process_labels:
+        l, _, _ = resized_mask.shape
+
     if height == letter_height:
         pad_pixels = int((letter_width - width) / 2)
         odd_pixel = 0 if width + pad_pixels * 2 == letter_width else 1
         left_img_pad = torch.zeros((c, letter_height, pad_pixels + odd_pixel), dtype=image.dtype)
         right_img_pad = torch.zeros((c, letter_height, pad_pixels), dtype=image.dtype)
-        left_mask_pad = torch.zeros((l, letter_height, pad_pixels + odd_pixel), dtype=mask.dtype)
-        right_mask_pad = torch.zeros((l, letter_height, pad_pixels), dtype=mask.dtype)
         for i in range(c):
             left_img_pad[i,:,:] = color[i]
             right_img_pad[i,:,:] = color[i]
         padded_image = torch.cat((left_img_pad, resized_image, right_img_pad), dim=-1)
-        padded_mask = torch.cat((left_mask_pad, resized_mask, right_mask_pad), dim=-1)
-        bbox[:,0] = ((bbox[:,0] * new_width) + pad_pixels) / letter_width
-        bbox[:,2] = (bbox[:, 2] * new_width) / letter_width
+        if process_labels:
+            left_mask_pad = torch.zeros((l, letter_height, pad_pixels + odd_pixel), dtype=mask.dtype)
+            right_mask_pad = torch.zeros((l, letter_height, pad_pixels), dtype=mask.dtype)
+            padded_mask = torch.cat((left_mask_pad, resized_mask, right_mask_pad), dim=-1)
+            bbox[:,0] = ((bbox[:,0] * new_width) + pad_pixels) / letter_width
+            bbox[:,2] = (bbox[:, 2] * new_width) / letter_width
     else:
         pad_pixels = int((letter_height - height) / 2)
         odd_pixel = 0 if height + pad_pixels * 2 == letter_height else 1
         top_img_pad = torch.zeros((c, pad_pixels + odd_pixel, letter_width), dtype=image.dtype)
         bottom_img_pad = torch.zeros((c, pad_pixels, letter_width), dtype=image.dtype)
-        top_mask_pad = torch.zeros((l, pad_pixels + odd_pixel, letter_width), dtype=mask.dtype)
-        bottom_mask_pad = torch.zeros((l, pad_pixels, letter_width), dtype=mask.dtype)
         for i in range(3):
             top_img_pad[i,:,:] = color[i]
             bottom_img_pad[i,:,:] = color[i]
         padded_image = torch.cat((top_img_pad, resized_image, bottom_img_pad), dim=-2)
-        padded_mask = torch.cat((top_mask_pad, resized_mask, bottom_mask_pad), dim=-2)
-        bbox[:,1] = ((bbox[:,1] * new_height) + pad_pixels) / letter_height
-        bbox[:,3] = (bbox[:,3] * new_height) / letter_height
+        if process_labels:
+            top_mask_pad = torch.zeros((l, pad_pixels + odd_pixel, letter_width), dtype=mask.dtype)
+            bottom_mask_pad = torch.zeros((l, pad_pixels, letter_width), dtype=mask.dtype)
+            padded_mask = torch.cat((top_mask_pad, resized_mask, bottom_mask_pad), dim=-2)
+            bbox[:,1] = ((bbox[:,1] * new_height) + pad_pixels) / letter_height
+            bbox[:,3] = (bbox[:,3] * new_height) / letter_height
+    
+    if not process_labels:
+        padded_mask = mask
 
     return padded_image, bbox, padded_mask
 
@@ -84,7 +93,7 @@ class YoloDataset(Dataset):
         self.label_paths = [os.path.join(self.labels_path, x) for x in sorted(os.listdir(self.labels_path))]
     
     def loadData(self, imagePath, labelsPath):
-        image = read_image(imagePath)
+        image = read_image(imagePath, ImageReadMode.RGB)
         _, width, height = image.shape
         with open(labelsPath) as stream:
              object_labels = stream.readlines()
@@ -155,7 +164,7 @@ if __name__ == "__main__":
     parser.add_argument('--height', default=640)
     args = parser.parse_args()
     dataset = YoloDataset(args.dataset, [args.height, args.width], args.validation)
-    dataloader = DataLoader(dataset, batch_size=1, collate_fn=dataset.collate_fn)
+    dataloader = DataLoader(dataset, batch_size=4, collate_fn=dataset.collate_fn)
     if args.visualize:
         os.makedirs("results/", exist_ok=True)
     for i, data in enumerate(dataloader):
