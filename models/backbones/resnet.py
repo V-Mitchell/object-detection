@@ -1,122 +1,183 @@
+import torch
 from torch import nn
 
 class Bottleneck(nn.Module):
     expansion = 4
 
     def __init__(self, in_channels, out_channels, stride=1, first_block=False):
-        super().__init__()
+        super(Bottleneck, self).__init__()
 
-        self.conv0 = nn.Conv2d(in_channels, out_channels, 1, 1, 0)
+        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
         self.bn0 = nn.BatchNorm2d(out_channels)
 
-        self.conv1 = nn.Conv2d(out_channels, out_channels, 3, stride, 1)
+        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=stride, padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
 
-        self.conv2 = nn.Conv2d(out_channels, out_channels*self.expansion, 1, 1, 0)
-        self.bn2 = nn.BatchNorm2d(out_channels*self.expansion)
+        self.conv2 = nn.Conv2d(out_channels,
+                               out_channels * self.expansion,
+                               kernel_size=1,
+                               stride=1,
+                               padding=0)
+        self.bn2 = nn.BatchNorm2d(out_channels * self.expansion)
 
-        self.relu = nn.ReLU(inplace=True)
-
+        self.relu = nn.ReLU()
         self.downsample = None
         if first_block:
-            self.downsample = nn.Sequential(nn.Conv2d(in_channels, out_channels*self.expansion, 1, stride, 0),
-                                            nn.BatchNorm2d(out_channels*self.expansion))
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_channels,
+                          out_channels * self.expansion,
+                         kernel_size=1,
+                          stride=stride,
+                          padding=0), nn.BatchNorm2d(out_channels * self.expansion))
 
     def forward(self, x):
         identity = x.clone()
         x = self.relu(self.bn0(self.conv0(x)))
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
-
         if self.downsample:
             identity = self.downsample(identity)
-
         x += identity
-        x = self.relu(x)
+        return self.relu(x)
 
-        return x
-
-class Block(nn.Module):
+class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, in_channels, out_channels, stride=1, first_block=False):
-        super().__init__()
+        super(BasicBlock, self).__init__()
 
-        self.conv0 = nn.Conv2d(in_channels, out_channels, 3, stride, 1)
+        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1)
         self.bn0 = nn.BatchNorm2d(out_channels)
 
-        self.conv1 = nn.Conv2d(out_channels, out_channels, 3, 1, 1)
+        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
 
-        self.relu = nn.ReLU(inplace=True)
-
+        self.relu = nn.ReLU()
+        self.stride = stride
         self.downsample = None
-        if first_block:
-            self.downsample = nn.Sequential(nn.Conv2d(in_channels, out_channels, 1, stride, 0),
-                                            nn.BatchNorm2d(out_channels))
+        if first_block and stride != 1:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0),
+                nn.BatchNorm2d(out_channels))
 
     def forward(self, x):
         identity = x.clone()
         x = self.relu(self.bn0(self.conv0(x)))
         x = self.bn1(self.conv1(x))
-
         if self.downsample:
             identity = self.downsample(identity)
-
         x += identity
-        return x
+        return self.relu(x)
 
 
 class ResNet(nn.Module):
-    def __init__(self, ResBlock = Bottleneck
-                 , blocks_list=[3, 4, 6, 3]
-                 , out_channels_list=[64, 128, 256, 512]
-                 , num_channels=3):
-        super().__init__()
+    in_channels = 64
 
-        self.conv0 = nn.Conv2d(num_channels, 64, 7, 2, 3)
-        self.bn0 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU()
-        self.max_pool = nn.MaxPool2d(3, 2, 1)
+    def __init__(self,
+                 ResBlock,
+                 blocks_list,
+                 out_channels_list=[64, 128, 256, 512],
+                 num_channels=3):
+        super(ResNet, self).__init__()
 
-        self.layer1 = self.create_layer(ResBlock, blocks_list[0], 64, out_channels_list[0], 1)
-        self.layer2 = self.create_layer(ResBlock, blocks_list[1], out_channels_list[0]*ResBlock.expansion, out_channels_list[1], 2)
-        self.layer3 = self.create_layer(ResBlock, blocks_list[2], out_channels_list[1]*ResBlock.expansion, out_channels_list[2], 2)
-        self.layer4 = self.create_layer(ResBlock, blocks_list[3], out_channels_list[2]*ResBlock.expansion, out_channels_list[3], 2)
+        self.conv0 = nn.Sequential(nn.Conv2d(num_channels, self.in_channels, kernel_size=7, stride=2, padding=3),
+                                   nn.BatchNorm2d(self.in_channels), nn.ReLU(),
+                                   nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
 
-    def create_layer(self, ResBlock, num_blocks, in_channels, out_channels, stride=1):
-        layer = []
-        for i in range(num_blocks):
-            if i == 0:
-                layer.append(ResBlock(in_channels, out_channels, stride, first_block=True))
-            else:
-                layer.append(ResBlock(out_channels*ResBlock.expansion, out_channels))
-        
-        return nn.Sequential(*layer)
 
+        self.layer0 = self.create_layer(ResBlock,
+                                        blocks_list[0],
+                                        self.in_channels,
+                                        out_channels_list[0],
+                                        stride=1)
+        self.layer1 = self.create_layer(ResBlock,
+                                        blocks_list[1],
+                                        out_channels_list[0] * ResBlock.expansion,
+                                        out_channels_list[1],
+                                        stride=2)
+        self.layer2 = self.create_layer(ResBlock,
+                                        blocks_list[2],
+                                        out_channels_list[1] * ResBlock.expansion,
+                                        out_channels_list[2],
+                                        stride=2)
+        self.layer3 = self.create_layer(ResBlock,
+                                        blocks_list[3],
+                                        out_channels_list[2] * ResBlock.expansion,
+                                        out_channels_list[3],
+                                        stride=2)
 
     def forward(self, x):
-        x = self.max_pool(self.relu(self.bn0(self.conv0(x))))
+        x = self.conv0(x)
 
-        f1 = self.layer1(x)
-        f2 = self.layer2(f1)
-        f3 = self.layer3(f2)
-        f4 = self.layer4(f3)
+        x0 = self.layer0(x)
+        x1 = self.layer1(x0)
+        x2 = self.layer2(x1)
+        x3 = self.layer3(x2)
+        return (x0, x1, x2, x3)
 
-        return (f1, f2, f3, f4)
+    def create_layer(self, ResBlock, blocks, in_channels, out_channels, stride=1):
+        layers = []
+        for i in range(blocks):
+            if i == 0:
+                layers.append(ResBlock(in_channels, out_channels, stride=stride, first_block=True))
+            else:
+                layers.append(ResBlock(out_channels * ResBlock.expansion, out_channels))
 
-def ResNet18(in_channels, out_channels_list):
-    return ResNet(Block, [2,2,2,2], out_channels_list, in_channels)
+        return nn.Sequential(*layers)
 
-def ResNet34(in_channels, out_channels_list):
-    return ResNet(Block, [3,4,6,3], out_channels_list, in_channels)
+def ResNet18(channels=3):
+    return ResNet(BasicBlock, [2, 2, 2, 2], num_channels=channels)
 
-def ResNet50(in_channels, out_channels_list):
-    return ResNet(Bottleneck, [3,4,6,3], out_channels_list, in_channels)
 
-def ResNet101(in_channels, out_channels_list):
-    return ResNet(Bottleneck, [3,4,23,3], out_channels_list, in_channels)
+def ResNet34(channels=3):
+    return ResNet(BasicBlock, [3, 4, 6, 3], num_channels=channels)
 
-def ResNet152(in_channels, out_channels_list):
-    return ResNet(Bottleneck, [3,8,36,3], out_channels_list, in_channels)
+
+def ResNet50(channels=3):
+    return ResNet(Bottleneck, [3, 4, 6, 3], num_channels=channels)
+
+
+def ResNet101(channels=3):
+    return ResNet(Bottleneck, [3, 4, 23, 3], num_channels=channels)
+
+
+def ResNet152(channels=3):
+    return ResNet(Bottleneck, [3, 8, 36, 3], num_channels=channels)
+
+
+if __name__ == "__main__":
+    import numpy as np
+
+    input = torch.Tensor(np.zeros((1, 3, 640, 640)))
+    print("Testing ResNet with input shape {shape}".format(shape=input.shape))
+
+    print("\nResNet18:")
+    resnet18 = ResNet18()
+    output = resnet18(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
+
+    print("\nResNet34:")
+    resnet34 = ResNet34()
+    output = resnet34(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
+
+    print("\nResNet50:")
+    resnet50 = ResNet50()
+    output = resnet50(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
+
+    print("\nResNet101:")
+    resnet101 = ResNet101()
+    output = resnet101(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
+
+    print("\nResNet152:")
+    resnet152 = ResNet152()
+    output = resnet152(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
 

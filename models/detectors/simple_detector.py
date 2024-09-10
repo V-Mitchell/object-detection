@@ -13,17 +13,27 @@ class SimpleDetector(nn.Module):
     def forward(self, x):
         feats = self.backbone(x)
         feats = self.neck(feats)
-        preds = self.head(feats)
-        pred_results = self.head.decode_predictions(preds[0], preds[1])
-        return pred_results
+        return self.head(feats)
+    
+    def loss(self, preds, labels):
+        return self.head.loss(preds, labels)
 
 if __name__ == "__main__":
+    print("Testing SimpleDetector")
     with open("./cfg/simple_detector.yaml") as stream:
         params = yaml.safe_load(stream)
+    print(params)
     detector = SimpleDetector(params["model"])
     detector.train()
 
-    x = torch.ones([1, 3, 600, 600])
-    out = detector(x)
-    for k, v in out.items():
-        print(k, v.shape)
+    x = torch.zeros([1, 3, 640, 640])
+    output = detector(x)
+    cls_preds, bbox_preds, coeff_preds, prototypes = output
+
+    for i, x in enumerate(cls_preds):
+        print("Class Scores x{num} Shape: {shape}".format(num=i, shape=x.shape))
+    for i, x in enumerate(bbox_preds):
+        print("BBox Predictions x{num} Shape: {shape}".format(num=i, shape=x.shape))
+    for i, x in enumerate(coeff_preds):
+        print("Mask Coeff Predictions x{num} Shape: {shape}".format(num=i, shape=x.shape))
+    print("Prototypes Shape: {shape}".format(shape=prototypes.shape))
