@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from models.network_registry import get_backbone, get_neck, get_head
 
+
 class SimpleDetector(nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -14,9 +15,10 @@ class SimpleDetector(nn.Module):
         feats = self.backbone(x)
         feats = self.neck(feats)
         return self.head(feats)
-    
+
     def loss(self, preds, labels):
         return self.head.loss(preds, labels)
+
 
 if __name__ == "__main__":
     print("Testing SimpleDetector")

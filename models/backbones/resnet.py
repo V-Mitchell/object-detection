@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -26,7 +27,7 @@ class Bottleneck(nn.Module):
             self.downsample = nn.Sequential(
                 nn.Conv2d(in_channels,
                           out_channels * self.expansion,
-                         kernel_size=1,
+                          kernel_size=1,
                           stride=stride,
                           padding=0), nn.BatchNorm2d(out_channels * self.expansion))
 
@@ -39,6 +40,7 @@ class Bottleneck(nn.Module):
             identity = self.downsample(identity)
         x += identity
         return self.relu(x)
+
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -80,10 +82,10 @@ class ResNet(nn.Module):
                  num_channels=3):
         super(ResNet, self).__init__()
 
-        self.conv0 = nn.Sequential(nn.Conv2d(num_channels, self.in_channels, kernel_size=7, stride=2, padding=3),
-                                   nn.BatchNorm2d(self.in_channels), nn.ReLU(),
-                                   nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
-
+        self.conv0 = nn.Sequential(
+            nn.Conv2d(num_channels, self.in_channels, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(self.in_channels), nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
 
         self.layer0 = self.create_layer(ResBlock,
                                         blocks_list[0],
@@ -124,6 +126,7 @@ class ResNet(nn.Module):
                 layers.append(ResBlock(out_channels * ResBlock.expansion, out_channels))
 
         return nn.Sequential(*layers)
+
 
 def ResNet18(channels=3):
     return ResNet(BasicBlock, [2, 2, 2, 2], num_channels=channels)
@@ -180,4 +183,3 @@ if __name__ == "__main__":
     output = resnet152(input)
     for i, x in enumerate(output):
         print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
-
