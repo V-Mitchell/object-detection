@@ -2,31 +2,32 @@ import yaml
 from tqdm import tqdm
 import torch
 from dataloader.dataloader import get_dataloader
-from optimizers import get_optimizer
-from utils import TensorboardLogger, get_device
-from models.detectors.simple_detector import SimpleDetector, class_bbox_mask_loss
+from engine.optimizers import get_optimizer
+from engine.trainer_utils import TensorboardLogger, get_device
+from models.detectors.simple_detector import SimpleDetector
 
-def train_epoch(epoch, model, loss_fn, dataloader, optimizer):
+
+def train_epoch(epoch, model, dataloader, optimizer):
 
     for i, data in enumerate(tqdm(dataloader, desc=f"Epoch {epoch}")):
         images, labels = data
-
         # optimizer.zero_grad()
 
-        # preds = model(images)
+        preds = model(images)
+        loss = model.loss(preds, labels)
 
-        # compute loss
-        # loss = loss_fn(labels, preds)
         # loss.backwards()
         loss = dict()
 
         # optimizer.step()
-    
+
     return loss
+
 
 def validate(model, dataloader):
     print("Validatiing...")
     pass
+
 
 def train(cfg):
     device = get_device(cfg["training"]["device"], cfg["dataloader"]["batch_size"])
@@ -40,7 +41,7 @@ def train(cfg):
 
     for epoch in range(cfg["training"]["epochs"]):
         model.train()
-        loss = train_epoch(epoch, model, class_bbox_mask_loss, train_dataloader, optimizer)
+        loss = train_epoch(epoch, model, train_dataloader, optimizer)
         model.eval()
         if cfg["training"]["validate_period"]:
             validate(model, val_dataloader)
