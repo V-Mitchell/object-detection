@@ -13,8 +13,8 @@ def xyxy2Mask(xyxy, width, height):
     for i, x in enumerate(xyxy):
         xyxy_points.append(int(x * wh[i % 2]))
     points = np.array(xyxy_points).reshape((-1, 2))
-    mask = np.zeros((width, height), np.uint8)
-    cv2.fillConvexPoly(mask, points, (255))
+    mask = np.zeros((width, height), np.float32)
+    cv2.fillConvexPoly(mask, points, (1.0))
     return mask
 
 
@@ -80,9 +80,9 @@ def letterbox(image, bbox, mask, letter_size, color=(255, 255, 255)):
 
 
 class YoloDataset(Dataset):
-    def __init__(self, dataset_path, input_size, validation=False):
+    def __init__(self, dataset_path, image_size, validation=False):
         super().__init__()
-        self.input_size = input_size
+        self.image_size = image_size
         if validation:
             dataset_path = os.path.join(dataset_path, "val/")
         else:
@@ -99,7 +99,7 @@ class YoloDataset(Dataset):
         ]
 
     def loadData(self, imagePath, labelsPath):
-        image = read_image(imagePath, ImageReadMode.RGB)
+        image = read_image(imagePath, ImageReadMode.RGB).to(torch.float32) / 255.0
         _, width, height = image.shape
         with open(labelsPath) as stream:
             object_labels = stream.readlines()
@@ -115,7 +115,7 @@ class YoloDataset(Dataset):
             object_mask.append(xyxy2Mask([x for x in map(float, label_split[5:])], width, height))
         labels = (torch.Tensor(object_classes).to(torch.int32),
                   torch.Tensor(object_bboxs).to(torch.float32),
-                  torch.Tensor(np.array(object_mask)).to(torch.int8))
+                  torch.Tensor(np.array(object_mask)).to(torch.float32))
         return (image, labels)
 
     def collate_fn(self, batch):
@@ -126,7 +126,7 @@ class YoloDataset(Dataset):
         for x in batch:
             image, labels = x
             classes, bboxs, masks = labels
-            image, bboxs, masks = letterbox(image, bboxs, masks, self.input_size)
+            image, bboxs, masks = letterbox(image, bboxs, masks, self.image_size)
             batch_images.append(image.unsqueeze(dim=0))
             batch_classes.append(classes)
             batch_bboxs.append(bboxs)
@@ -146,7 +146,7 @@ DATASETS = {"YoloDataset": YoloDataset}
 
 
 def get_dataloader(cfg, validation=False):
-    dataset = DATASETS[cfg["dataset"]](cfg["dataset_path"], cfg["input_size"], validation)
+    dataset = DATASETS[cfg["dataset"]](cfg["dataset_path"], cfg["image_size"], validation)
     return DataLoader(dataset,
                       cfg["batch_size"],
                       cfg["shuffle"],

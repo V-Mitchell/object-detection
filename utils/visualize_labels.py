@@ -12,14 +12,14 @@ def draw_mask(image, mask, alpha):
 
 
 def draw_object_labels(save_path, img, classes, bboxs, masks):
-    cv_img = img.numpy()
+    cv_img = (img.numpy() * 255).astype(np.uint8)
     cv_img = np.transpose(cv_img, (1, 2, 0))
     cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
     h, w, _ = cv_img.shape
 
     np_classes = classes.numpy()
     np_bboxs = bboxs.numpy()
-    np_masks = masks.numpy()
+    np_masks = (masks.numpy() * 255).astype(np.uint8)
 
     for cls, bbox, mask in zip(np_classes, np_bboxs, np_masks):
         top_left = (int((bbox[0] - bbox[2] / 2) * w), int((bbox[1] - bbox[3] / 2) * h))
