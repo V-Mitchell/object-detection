@@ -36,14 +36,13 @@ class ProtoNet(nn.Module):
         return self.projection(proto_feats)
 
     def compute_masks(self, prototypes, coeffs):
-        coeffs_trans = torch.transpose(coeffs, 0, 1)
-        return torch.matmul(prototypes, coeffs_trans)
+        return torch.matmul(prototypes, torch.transpose(coeffs, 0, 1))
 
 
 if __name__ == "__main__":
     import numpy as np
 
-    batch_size = 1
+    batch_size = 2
     x0 = torch.Tensor(np.zeros((batch_size, 256, 160, 160)))
     x1 = torch.Tensor(np.zeros((batch_size, 256, 80, 80)))
     x2 = torch.Tensor(np.zeros((batch_size, 256, 40, 40)))
@@ -60,13 +59,14 @@ if __name__ == "__main__":
     input = (x0, x1, x2, x3, x4)
     prototypes = proto_net(input)
     print("Output Prototypes: {shape}\n".format(shape=prototypes.shape))
-    prototypes = torch.squeeze(prototypes)
-    prototypes = torch.permute(prototypes, (1, 2, 0))
 
     print("Testing Mask Computation")
-    pred_coeffs = torch.randn((50, 8))
-    print("Processed Prototypes: {shape}".format(shape=prototypes.shape))
-    print("Prediction Coefficients: {shape}".format(shape=pred_coeffs.shape))
+    pred_coeffs = torch.randn((batch_size, 50, 8))
+    masks = []
+    for (prototype, coeffs) in zip(prototypes, pred_coeffs):
+        prototype = torch.squeeze(prototype)
+        prototype = torch.permute(prototype, (1, 2, 0))
+        masks.append(proto_net.compute_masks(prototype, coeffs).unsqueeze(0))
+    masks = torch.cat(masks, 0)
 
-    masks = proto_net.compute_masks(prototypes, pred_coeffs)
     print("Masks: {shape}".format(shape=masks.shape))
