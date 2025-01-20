@@ -17,10 +17,11 @@ def calculate_ious(bbox1, bbox2, eps=1e-9):
     return intersection / union
 
 
-def metrics_topk(metrics, topk, largest=True, eps=1e-9):
+def metrics_topk(metrics, topk, eps=1e-9):
     _, num_priors = metrics.shape
-    topk_metrics, topk_idxs = torch.topk(metrics, topk, dim=-1, largest=largest)
-    topk_mask = (topk_metrics.max(dim=-1, keepdim=True)[0] > eps).tile((1, topk))
+    topk_metrics, topk_idxs = torch.topk(metrics, topk, dim=-1, largest=True)
+    topk_mask = (topk_metrics.max(dim=-1, keepdim=True)[0] > eps).tile(
+        (1, topk))  # what if no metric is above eps?
     topk_idxs = torch.where(topk_mask, topk_idxs, torch.zeros_like(topk_idxs))
     is_in_topk = F.one_hot(topk_idxs, num_priors).sum(dim=-2)
     is_in_topk = torch.where(is_in_topk > 1, torch.zeros_like(is_in_topk), is_in_topk)
@@ -29,7 +30,7 @@ def metrics_topk(metrics, topk, largest=True, eps=1e-9):
 
 def compute_max_iou_prior(ious):
     num_bbox_gt = ious.shape[-2]
-    max_iou_idx = ious.argmax(dim=-2)
+    max_iou_idx = ious.argmax(dim=-2)  # gt label idx of which the prior has the max iou
     is_max_iou = F.one_hot(max_iou_idx, num_bbox_gt).permute(1, 0)
     return is_max_iou.to(ious.dtype)
 
@@ -38,19 +39,22 @@ class TaskAlignedAssigner(nn.Module):
     def __init__(self, num_classes, topk=13, alpha=1.0, beta=6.0, eps=1e-9):
         super(TaskAlignedAssigner, self).__init__()
         self.num_classes = num_classes
+        self.bg_idx = 0
         self.topk = topk
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
 
     @torch.no_grad
-    def forward(self, cls_pred, bbox_pred, label_gt, bbox_gt, bg_idx):
+    def forward(self, cls_pred, bbox_pred, label_gt, bbox_gt):
         """
         Task Aligned Assigner:
-            1. Compute allginment between all bbox predictions and gt, based on IoU
+            1. Compute allginment metrics between all bbox predictions and gt, based on IoU
             2. Select topk bboxes as candidates for each gt
-            3. 
-            4. 
+            3. Assign gt label with max iou score per each prediction
+            Note: - BG label is assumed to be 0, whereas all FG labels are > 0
+            - BG predictions are represented as the absence of confidence in any FG predictions
+              i.e. the total number of predicted classes is the number of FG classes
 
             P = number of priors
             C = number of classes
@@ -66,29 +70,35 @@ class TaskAlignedAssigner(nn.Module):
             assigned_bbox (Tensor): (P, 4)
             assigned_cls (Tensor): (P, C)
         """
-        device = cls_pred.device
         num_priors, num_classes = cls_pred.shape
         num_bbox_gt, _ = bbox_gt.shape
 
         if num_bbox_gt == 0:
-            assigned_labels = torch.full((num_priors), bg_idx)
+            assigned_gt_index = torch.full((num_priors, ), 0)
+            assigned_labels = torch.full((num_priors, ), self.bg_idx)
             assigned_bboxes = torch.zeros((num_priors, 4))
             assigned_cls = torch.zeros((num_priors, num_classes))
-            return (assigned_labels, assigned_bboxes, assigned_cls)
+            return (assigned_gt_index, assigned_labels, assigned_cls, assigned_bboxes)
 
         # calculate IoUs between each gt bbox and each prediction bbox
         ious = calculate_ious(bbox_gt, bbox_pred)
         cls_pred = cls_pred.permute(1, 0)
         label_gt = label_gt.long()
 
-        # bbox_cls_scores = torch.zeros((num_bbox_gt, num_priors), dtype=torch.float, device=device)
-        bbox_cls_scores = cls_pred[label_gt.squeeze(-1)]
+        bbox_cls_scores = cls_pred[label_gt.squeeze(-1) - 1]
         # element-wise multiplication
         alignment_metrics = bbox_cls_scores.pow(self.alpha) * ious.pow(self.beta)
-        is_in_topk = metrics_topk(alignment_metrics, self.topk)
+        if alignment_metrics.max() < self.eps:
+            assigned_gt_index = torch.full((num_priors, ), 0)
+            assigned_labels = torch.full((num_priors, ), self.bg_idx)
+            assigned_bboxes = torch.zeros((num_priors, 4))
+            assigned_cls = torch.zeros((num_priors, num_classes))
+            return (assigned_gt_index, assigned_labels, assigned_cls, assigned_bboxes)
+
+        is_in_topk = metrics_topk(alignment_metrics, self.topk, self.eps)
 
         mask_positive = is_in_topk
-        mask_positive_sum = mask_positive.sum(dim=-2)
+        mask_positive_sum = mask_positive.sum(dim=-2)  # sum of gt matches for each prior
         if mask_positive_sum.max() > 1:
             mask_multiple_gts = (mask_positive_sum.unsqueeze(0) > 1).repeat([num_bbox_gt, 1])
             is_max_iou = compute_max_iou_prior(ious)
@@ -97,12 +107,14 @@ class TaskAlignedAssigner(nn.Module):
 
         assigned_gt_index = mask_positive.argmax(dim=-2)
         assigned_labels = label_gt[assigned_gt_index]
-        assigned_labels = torch.where(mask_positive_sum > 0, assigned_labels,
-                                      torch.full_like(assigned_labels, bg_idx))
+        assigned_cls = F.one_hot(assigned_labels - 1, num_classes)
         assigned_bboxes = bbox_gt.reshape([-1, 4])[assigned_gt_index]
-        assigned_cls = F.one_hot(assigned_labels, num_classes)
+        assigned_labels = torch.where(mask_positive_sum > 0, assigned_labels,
+                                      torch.full_like(assigned_labels, self.bg_idx))
+        assigned_cls = torch.where((assigned_labels != self.bg_idx).unsqueeze(1).tile(
+            (1, num_classes)), assigned_cls, torch.zeros_like(assigned_cls))
 
-        return (assigned_labels, assigned_cls, assigned_bboxes)
+        return (assigned_gt_index, assigned_labels, assigned_cls, assigned_bboxes)
 
 
 class SimOTAAssigner(nn.Module):
@@ -123,13 +135,13 @@ if __name__ == "__main__":
     num_priors = 10000
     num_classes = 8
     num_gt = 10
-    bg_idx = 0
     # Normalize cls and bbox preds
     cls_pred = torch.randn((num_priors, num_classes)).sigmoid()
     bbox_pred = torch.randn((num_priors, 4)).sigmoid() * 640
 
-    # BG label = 0, FG labels > 0, num FG classes = num_classes - 1
-    label_gt = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 1, 2, 3]).to(torch.long)
+    # BG label = 0, FG labels > 0, num FG classes = num_classes
+    # BG predictions are represented by an absence of FG prediction confidence
+    label_gt = torch.Tensor([1, 2, 3, 4, 5, 6, 7, 8, 1, 2]).to(torch.long)
     # BBox format: xyxy
     bbox_gt = torch.Tensor(
         np.array([[10, 10, 100, 100], [100, 10, 120, 50], [50, 10, 100, 100], [250, 250, 350, 350],
@@ -141,8 +153,8 @@ if __name__ == "__main__":
     print("GT BBoxes Shape: {shape}\n\n".format(shape=bbox_gt.shape))
 
     task_aligned_assigner = TaskAlignedAssigner(num_classes)
-    assigned_labels, assigned_cls, assigned_bboxes = task_aligned_assigner(
-        cls_pred, bbox_pred, label_gt, bbox_gt, bg_idx)
+    _, assigned_labels, assigned_cls, assigned_bboxes = task_aligned_assigner(
+        cls_pred, bbox_pred, label_gt, bbox_gt)
 
     print("Assigned Labels Shape: {shape}".format(shape=assigned_labels.shape))
     print("Assigned BBoxes Shape: {shape}".format(shape=assigned_bboxes.shape))
@@ -150,7 +162,7 @@ if __name__ == "__main__":
     pos_labels = 0
     for i, (assign_label, assign_bbox, assign_cls, pred_bbox, pred_cls) in enumerate(
             zip(assigned_labels, assigned_bboxes, assigned_cls, bbox_pred, cls_pred)):
-        if assign_label != bg_idx:
+        if assign_label != task_aligned_assigner.bg_idx:
             pos_labels += 1
             print(
                 "Label {l} Pred BBox {pbbox} Assign BBox {abbox} Pred Cls {pcls} Assign Cls {acls}\n"
