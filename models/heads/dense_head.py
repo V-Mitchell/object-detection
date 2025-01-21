@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 from models.heads.proto_net import ProtoNet
 from models.assigner.assigner import TaskAlignedAssigner
+from models.loss.class_loss import FocalLoss
+from models.loss.bbox_loss import CIoULoss
+from models.loss.mask_loss import DiceLoss
 
 
 class DenseHead(nn.Module):
@@ -18,9 +21,12 @@ class DenseHead(nn.Module):
         self.proto_head = ProtoNet(input_channels,
                                    feat_channels,
                                    stacked_convs=4,
-                                   num_levels=5,
+                                   num_levels=3,
                                    num_prototypes=num_prototypes)
-        self.assigner = TaskAlignedAssigner(num_classes)
+        self.assigner = TaskAlignedAssigner(num_classes, bg_index, num_prototypes)
+        self.cls_loss = FocalLoss()
+        self.bbox_loss = CIoULoss()
+        self.mask_loss = DiceLoss(False)
 
         cls_convs = []
         reg_convs = []
@@ -86,20 +92,35 @@ class DenseHead(nn.Module):
             coeff_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, self.num_prototypes)
             for coeff_pred in coeff_preds
         ], 1)
+        device = cls_preds.device
         cls_labels, bbox_labels, mask_labels = labels
         cls_losses = []
         bbox_losses = []
         mask_losses = []
-        for cls_pred, bbox_pred, coeff_pred, cls_label, bbox_label, mask_label in zip(
-                cls_preds, bbox_preds, coeff_preds, cls_labels, bbox_labels, mask_labels):
-            print("Batch Cls Scores {shape}".format(shape=cls_pred.shape))
-            print("Batch BBox Preds {shape}".format(shape=bbox_pred.shape))
-            print("Batch Coeff Preds {shape}".format(shape=coeff_pred.shape))
-            assigned_labels, assigned_cls, assigned_bboxes = self.assigner(
-                cls_pred, bbox_pred, cls_label, bbox_label, self.bg_index)
-            print("Assigned Labels {shape}".format(shape=assigned_labels.shape))
-            print("Assigned Cls {shape}".format(shape=assigned_cls.shape))
-            print("Assigned BBox {shape}".format(shape=assigned_bboxes.shape))
+        for (cls_pred, bbox_pred, coeff_pred, prototype, cls_label, bbox_label,
+             mask_label) in zip(cls_preds, bbox_preds, coeff_preds, prototypes, cls_labels,
+                                bbox_labels, mask_labels):
+            cls_label = cls_label.to(device)
+            bbox_label = bbox_label.to(device)
+            mask_label = mask_label.to(device)
+            assigned_label_idx, assigned_label, assigned_cls, assigned_bbox = self.assigner(
+                cls_pred, bbox_pred, cls_label, bbox_label)
+
+            positive_mask = assigned_label != self.bg_index
+            positive_mask_pred = self.proto_head.compute_masks(torch.permute(prototype, (1, 2, 0)),
+                                                               coeff_pred[positive_mask]).permute(
+                                                                   (2, 0, 1))
+            positive_assigned_mask = mask_label[assigned_label_idx[positive_mask]]
+            cls_losses.append(self.cls_loss(cls_pred, assigned_cls).unsqueeze(0))
+            bbox_losses.append(self.bbox_loss(bbox_pred, assigned_bbox).unsqueeze(0))
+            mask_losses.append(
+                self.mask_loss(positive_mask_pred, positive_assigned_mask).unsqueeze(0))
+
+        loss = dict()
+        loss["class"] = torch.cat(cls_losses, 0).mean()
+        loss["bbox"] = torch.cat(bbox_losses, 0).mean()
+        loss["mask"] = torch.cat(mask_losses, 0).mean()
+        return loss
 
 
 if __name__ == "__main__":
@@ -156,3 +177,4 @@ if __name__ == "__main__":
     labels = (cls_gt, bbox_gt, mask_gt)
 
     loss = dense_head.loss(output, labels)
+    print("loss", loss)
