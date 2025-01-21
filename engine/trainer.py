@@ -7,20 +7,21 @@ from engine.trainer_utils import TensorboardLogger, get_device
 from models.detectors.simple_detector import SimpleDetector
 
 
-def train_epoch(epoch, model, dataloader, optimizer):
+def train_epoch(epoch, model, dataloader, optimizer, device):
 
-    for i, data in enumerate(tqdm(dataloader, desc=f"Epoch {epoch}")):
+    last_loss = 0.0
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch} - Loss {last_loss}")
+    for i, data in enumerate(pbar):
         images, labels = data
-        # optimizer.zero_grad()
 
-        preds = model(images)
-        loss = model.loss(preds, labels)
-
-        # loss.backwards()
-        loss = dict()
-
-        # optimizer.step()
-
+        optimizer.zero_grad()
+        preds = model(images.to(device=device))
+        loss = model.module.loss(preds, labels)
+        total_loss = loss["class"] + loss["bbox"] + loss["mask"]
+        total_loss.backward()
+        last_loss = total_loss.item()
+        pbar.set_description(f"Epoch {epoch} - Loss {last_loss}")
+        optimizer.step()
     return loss
 
 
@@ -31,7 +32,10 @@ def validate(model, dataloader):
 
 def train(cfg):
     device = get_device(cfg["training"]["device"], cfg["dataloader"]["batch_size"])
-    model = torch.nn.DataParallel(SimpleDetector(cfg["model"]), device_ids=[device])
+    if device != torch.device("cpu"):
+        torch.cuda.device(device=device)
+    model = SimpleDetector(cfg["model"]).to(device=device)
+    model = torch.nn.DataParallel(module=model, device_ids=[device])
 
     optimizer = get_optimizer(cfg["training"]["optimizer"], model.parameters())
     train_dataloader = get_dataloader(cfg["dataloader"])
@@ -41,7 +45,7 @@ def train(cfg):
 
     for epoch in range(cfg["training"]["epochs"]):
         model.train()
-        loss = train_epoch(epoch, model, train_dataloader, optimizer)
+        loss = train_epoch(epoch, model, train_dataloader, optimizer, device)
         model.eval()
         if cfg["training"]["validate_period"]:
             validate(model, val_dataloader)
