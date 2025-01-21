@@ -20,6 +20,8 @@ def calculate_ious(bbox1, bbox2, eps=1e-9):
 def metrics_topk(metrics, topk, eps=1e-9):
     _, num_priors = metrics.shape
     topk_metrics, topk_idxs = torch.topk(metrics, topk, dim=-1, largest=True)
+    if topk_metrics.numel() < 1:
+        return torch.zeros_like(metrics)
     topk_mask = (topk_metrics.max(dim=-1, keepdim=True)[0] > eps).tile(
         (1, topk))  # what if no metric is above eps?
     topk_idxs = torch.where(topk_mask, topk_idxs, torch.zeros_like(topk_idxs))
@@ -70,14 +72,15 @@ class TaskAlignedAssigner(nn.Module):
             assigned_bbox (Tensor): (P, 4)
             assigned_cls (Tensor): (P, C)
         """
+        device = cls_pred.device
         num_priors, num_classes = cls_pred.shape
-        num_bbox_gt, _ = bbox_gt.shape
+        bbox_gt_shape = bbox_gt.shape
 
-        if num_bbox_gt == 0:
-            assigned_gt_index = torch.full((num_priors, ), 0)
-            assigned_labels = torch.full((num_priors, ), self.bg_idx)
-            assigned_bboxes = torch.zeros((num_priors, 4))
-            assigned_cls = torch.zeros((num_priors, num_classes))
+        if bbox_gt_shape[0] == 0:
+            assigned_gt_index = torch.full((num_priors, ), 0, device=device)
+            assigned_labels = torch.full((num_priors, ), self.bg_idx, device=device)
+            assigned_bboxes = torch.zeros((num_priors, 4), device=device)
+            assigned_cls = torch.zeros((num_priors, num_classes), device=device)
             return (assigned_gt_index, assigned_labels, assigned_cls, assigned_bboxes)
 
         # calculate IoUs between each gt bbox and each prediction bbox
@@ -88,19 +91,12 @@ class TaskAlignedAssigner(nn.Module):
         bbox_cls_scores = cls_pred[label_gt.squeeze(-1) - 1]
         # element-wise multiplication
         alignment_metrics = bbox_cls_scores.pow(self.alpha) * ious.pow(self.beta)
-        if alignment_metrics.max() < self.eps:
-            assigned_gt_index = torch.full((num_priors, ), 0)
-            assigned_labels = torch.full((num_priors, ), self.bg_idx)
-            assigned_bboxes = torch.zeros((num_priors, 4))
-            assigned_cls = torch.zeros((num_priors, num_classes))
-            return (assigned_gt_index, assigned_labels, assigned_cls, assigned_bboxes)
-
         is_in_topk = metrics_topk(alignment_metrics, self.topk, self.eps)
 
         mask_positive = is_in_topk
         mask_positive_sum = mask_positive.sum(dim=-2)  # sum of gt matches for each prior
         if mask_positive_sum.max() > 1:
-            mask_multiple_gts = (mask_positive_sum.unsqueeze(0) > 1).repeat([num_bbox_gt, 1])
+            mask_multiple_gts = (mask_positive_sum.unsqueeze(0) > 1).repeat([bbox_gt_shape[0], 1])
             is_max_iou = compute_max_iou_prior(ious)
             mask_positive = torch.where(mask_multiple_gts, is_max_iou, mask_positive)
             mask_positive_sum = mask_positive.sum(dim=-2)
