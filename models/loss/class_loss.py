@@ -9,6 +9,7 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
 
     def forward(self, input, target):
+        target = target.to(torch.int64)
         logpt = F.log_softmax(input, dim=-1)
         logpt = logpt.gather(1, target)
         logpt = logpt.view(-1)
