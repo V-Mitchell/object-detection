@@ -1,11 +1,13 @@
 import os
 import torch
 from torch.utils.tensorboard.writer import SummaryWriter
+from datetime import datetime
 
 
 class TensorboardLogger():
-    def __init__(self, log_path):
-        self.writer = SummaryWriter(log_path)
+    def __init__(self, base_log_path):
+        self.log_path = os.path.join(base_log_path, datetime.today().strftime("%Y-%m-%d-%H-%M-%S"))
+        self.writer = SummaryWriter(self.log_path)
 
     def log_dict(self, data_dict, step):
         for k, v in data_dict.items():
