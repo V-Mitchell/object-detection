@@ -1,4 +1,5 @@
 import torch
+from utils.dict import remove_key
 
 OPTIMIZERS = {
     "Adam": torch.optim.Adam,
@@ -8,5 +9,5 @@ OPTIMIZERS = {
 }
 
 
-def get_optimizer(optimizer_type, model_params):
-    return OPTIMIZERS[optimizer_type](model_params)
+def get_optimizer(cfg, model_params):
+    return OPTIMIZERS[cfg["type"]](model_params, **remove_key(cfg, ["type"]))
