@@ -32,4 +32,9 @@ training:
   epochs: 50
   validate_period: 
   device: 0
-  optimizer: "Adam"
+  optimizer:
+    type: "AdamW"
+    lr: 0.001
+    betas: [0.9, 0.999]
+    eps: 0.00000001
+    weight_decay: 0.01
