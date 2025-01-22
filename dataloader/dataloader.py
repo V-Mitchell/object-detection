@@ -5,6 +5,7 @@ from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.functional import resize
 import numpy as np
 import cv2
+from utils.bbox import xywh2xyxy
 
 
 def xyxy2Mask(xyxy, width, height):
@@ -18,7 +19,7 @@ def xyxy2Mask(xyxy, width, height):
     return mask
 
 
-def letterbox(image, bbox, mask, letter_size, color=(255, 255, 255)):
+def letterbox(image, bbox, mask, letter_size, color=(1.0, 1.0, 1.0)):
     _, height, width = image.shape
     image_ar = float(width) / height
     letter_height, letter_width = letter_size
@@ -127,6 +128,8 @@ class YoloDataset(Dataset):
             image, labels = x
             classes, bboxs, masks = labels
             image, bboxs, masks = letterbox(image, bboxs, masks, self.image_size)
+            if bboxs.numel() > 0:
+                bboxs = xywh2xyxy(bboxs)
             batch_images.append(image.unsqueeze(dim=0))
             batch_classes.append(classes)
             batch_bboxs.append(bboxs)
