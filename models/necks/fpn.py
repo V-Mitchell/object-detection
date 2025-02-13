@@ -3,39 +3,55 @@ from torch import nn
 import torch.nn.functional as F
 
 
-class FPNBlock(nn.Module):
-    def __init__(self, in_channels, out_channels=256, highest_block=False):
-        super(FPNBlock, self).__init__()
-
-        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.highest_block = highest_block
-
-    def forward(self, feats):
-        x, y = feats
-        x = self.conv0(x)
-        if not self.highest_block:
-            x += F.interpolate(y, scale_factor=2, mode="bilinear", align_corners=True)
-        return (x, self.conv1(x))
-
-
 class FPN(nn.Module):
     def __init__(self, expansion, in_channels_list=[64, 128, 256, 512], out_channels=256):
         super(FPN, self).__init__()
 
-        self.p0 = FPNBlock(in_channels_list[0] * expansion, out_channels)
-        self.p1 = FPNBlock(in_channels_list[1] * expansion, out_channels)
-        self.p2 = FPNBlock(in_channels_list[2] * expansion, out_channels)
-        self.p3 = FPNBlock(in_channels_list[3] * expansion, out_channels, highest_block=True)
         self.p4 = nn.MaxPool2d(kernel_size=1, stride=2, padding=0)
+        self.p3 = nn.Sequential(
+            nn.Conv2d(in_channels_list[3] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p2_lat = nn.Sequential(
+            nn.Conv2d(in_channels_list[2] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p1_lat = nn.Sequential(
+            nn.Conv2d(in_channels_list[1] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p0_lat = nn.Sequential(
+            nn.Conv2d(in_channels_list[0] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p2_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
+        self.p1_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
+        self.p0_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
+
+    def upsample_add(self, x, y):
+        return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True) + y
 
     def forward(self, feats):
         x0, x1, x2, x3 = feats
-        x, p3 = self.p3((x3, None))
-        x, p2 = self.p2((x2, x))
-        x, p1 = self.p1((x1, x))
-        x, p0 = self.p0((x0, x))
+        p3 = self.p3(x3)
         p4 = self.p4(p3)
+        p2 = self.upsample_add(p3, self.p2_lat(x2))
+        p1 = self.upsample_add(p2, self.p1_lat(x1))
+        p0 = self.upsample_add(p1, self.p0_lat(x0))
+        p2 = self.p2_smth(p2)
+        p1 = self.p2_smth(p1)
+        p0 = self.p2_smth(p0)
         return (p0, p1, p2, p3, p4)
 
 

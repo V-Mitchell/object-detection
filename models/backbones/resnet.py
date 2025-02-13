@@ -22,7 +22,7 @@ class Bottleneck(nn.Module):
         self.bn2 = nn.BatchNorm2d(out_channels * self.expansion)
 
         self.relu = nn.ReLU()
-        self.downsample = None
+        self.downsample = nn.Sequential()
         if first_block:
             self.downsample = nn.Sequential(
                 nn.Conv2d(in_channels,
@@ -32,14 +32,11 @@ class Bottleneck(nn.Module):
                           padding=0), nn.BatchNorm2d(out_channels * self.expansion))
 
     def forward(self, x):
-        identity = x.clone()
-        x = self.relu(self.bn0(self.conv0(x)))
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.bn2(self.conv2(x))
-        if self.downsample:
-            identity = self.downsample(identity)
-        x += identity
-        return self.relu(x)
+        y = self.relu(self.bn0(self.conv0(x)))
+        y = self.relu(self.bn1(self.conv1(y)))
+        y = self.bn2(self.conv2(y))
+        y += self.downsample(x)
+        return self.relu(y)
 
 
 class BasicBlock(nn.Module):
@@ -56,20 +53,17 @@ class BasicBlock(nn.Module):
 
         self.relu = nn.ReLU()
         self.stride = stride
-        self.downsample = None
+        self.downsample = nn.Sequential()
         if first_block and stride != 1:
             self.downsample = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0),
                 nn.BatchNorm2d(out_channels))
 
     def forward(self, x):
-        identity = x.clone()
-        x = self.relu(self.bn0(self.conv0(x)))
-        x = self.bn1(self.conv1(x))
-        if self.downsample:
-            identity = self.downsample(identity)
-        x += identity
-        return self.relu(x)
+        y = self.relu(self.bn0(self.conv0(x)))
+        y = self.bn1(self.conv1(y))
+        y += self.downsample(x)
+        return self.relu(y)
 
 
 class ResNet(nn.Module):
@@ -109,9 +103,7 @@ class ResNet(nn.Module):
                                         stride=2)
 
     def forward(self, x):
-        x = self.conv0(x)
-
-        x0 = self.layer0(x)
+        x0 = self.layer0(self.conv0(x))
         x1 = self.layer1(x0)
         x2 = self.layer2(x1)
         x3 = self.layer3(x2)
