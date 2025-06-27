@@ -26,11 +26,11 @@ if __name__ == "__main__":
     with open("./cfg/simple_detector.yaml") as stream:
         params = yaml.safe_load(stream)
     print(params)
-    detector = SimpleDetector(params["model"])
-    detector.train()
+    model = SimpleDetector(params["model"])
+    model.train()
 
     x = torch.zeros([1, 3, 640, 640])
-    output = detector(x)
+    output = model(x)
     cls_preds, bbox_preds, coeff_preds, prototypes = output
 
     for i, x in enumerate(cls_preds):
@@ -66,4 +66,4 @@ if __name__ == "__main__":
     print("GT Masks Shape: {shape}\n".format(shape=mask_gt.shape))
     labels = (cls_gt, bbox_gt, mask_gt)
 
-    loss = detector.loss(output, labels)
+    loss = model.loss(output, labels)
