@@ -7,54 +7,81 @@ class PANet(nn.Module):
     def __init__(self, expansion, input_channels=[64, 128, 256, 512]):
         super(PANet, self).__init__()
 
-        self.p0_lat_conv = nn.Conv2d(input_channels[0] * expansion + input_channels[1] * expansion,
-                                     input_channels[0] * expansion,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1)
-        self.p1_lat_conv1 = nn.Conv2d(input_channels[1] * expansion +
-                                      input_channels[2] * expansion,
-                                      input_channels[1] * expansion,
-                                      kernel_size=3,
-                                      stride=1,
-                                      padding=1)
-        self.p2_lat_conv1 = nn.Conv2d(input_channels[2] * expansion +
-                                      input_channels[3] * expansion,
-                                      input_channels[2] * expansion,
-                                      kernel_size=3,
-                                      stride=1,
-                                      padding=1)
-        self.p1_lat_conv2 = nn.Conv2d(input_channels[1] * expansion * 2,
-                                      input_channels[1] * expansion,
-                                      kernel_size=3,
-                                      stride=1,
-                                      padding=1)
-        self.p2_lat_conv2 = nn.Conv2d(input_channels[2] * expansion * 2,
-                                      input_channels[2] * expansion,
-                                      kernel_size=3,
-                                      stride=1,
-                                      padding=1)
-        self.p3_lat_conv = nn.Conv2d(input_channels[3] * expansion * 2,
-                                     input_channels[3] * expansion,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1)
+        # pair each conv with batchnorm and activation ???
+        self.relu = nn.ReLU()
+        self.p0_lat_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[0] * expansion + input_channels[1] * expansion,
+                      input_channels[0] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[0] * expansion), self.relu
+        ])
+        self.p1_lat_conv1 = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion + input_channels[2] * expansion,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p2_lat_conv1 = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion + input_channels[3] * expansion,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p1_lat_conv2 = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion * 2,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p2_lat_conv2 = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion * 2,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p3_lat_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[3] * expansion * 2,
+                      input_channels[3] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[3] * expansion), self.relu
+        ])
 
-        self.p0_down_conv = nn.Conv2d(input_channels[0] * expansion,
-                                      input_channels[1] * expansion,
-                                      kernel_size=3,
-                                      stride=2,
-                                      padding=1)
-        self.p1_down_conv = nn.Conv2d(input_channels[1] * expansion,
-                                      input_channels[2] * expansion,
-                                      kernel_size=3,
-                                      stride=2,
-                                      padding=1)
-        self.p2_down_conv = nn.Conv2d(input_channels[2] * expansion,
-                                      input_channels[3] * expansion,
-                                      kernel_size=3,
-                                      stride=2,
-                                      padding=1)
+        self.p0_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[0] * expansion,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p1_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p2_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion,
+                      input_channels[3] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[3] * expansion), self.relu
+        ])
 
     def forward(self, feats):
         x0, x1, x2, x3 = feats
