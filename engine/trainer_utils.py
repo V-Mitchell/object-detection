@@ -13,6 +13,9 @@ class TensorboardLogger():
         for k, v in data_dict.items():
             self.writer.add_scalar(k, v, step)
 
+    def get_log_path(self):
+        return self.log_path
+
 
 def get_device(device="", batch_size=0, newline=True):
     s = f"torch-{torch.__version__} "
@@ -50,8 +53,15 @@ def get_device(device="", batch_size=0, newline=True):
     return torch.device(arg)
 
 
-def save_ckpt(epoch, model):
-    pass
+def save_checkpoint(state_dict, epoch, save_path):
+    torch.save(state_dict, os.path.join(save_path, "checkpoint", "last.pt.tar"))
+
+
+def save_model(model_state_dict, epoch, save_path):
+    dir_path = os.path.join(save_path, "model")
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+    torch.save(model_state_dict, os.path.join(dir_path, str(epoch) + ".pt"))
 
 
 def get_log_path():

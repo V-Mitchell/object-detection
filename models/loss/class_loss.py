@@ -8,11 +8,14 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
 
-    def forward(self, input, target):
+    def forward(self, input, target, weights=None):
+        """
+        Input: Class logits of shape [N, C] (input is unnormalized)
+        Target: Target of shape [N, C]
+        """
         target = target.to(torch.int64)
         logpt = F.log_softmax(input, dim=-1)
         logpt = logpt.gather(1, target)
-        logpt = logpt.view(-1)
         pt = logpt.data.exp()
         loss = -1 * (1 - pt)**self.gamma * logpt
         return loss.mean()
@@ -22,7 +25,11 @@ class BCELoss(nn.Module):
     def __init__(self):
         super(BCELoss, self).__init__()
 
-    def forward(self, input, target):
+    def forward(self, input, target, weights=None):
+        """
+        Input: Class logits of shape [N, C] (input is unnormalized)
+        Target: Target of shape [N, C]
+        """
         loss = F.binary_cross_entropy_with_logits(input, target.float(), reduction='none')
         return loss.mean()
 
@@ -33,7 +40,7 @@ if __name__ == "__main__":
 
     num_preds = 10
     num_classes = 5
-    input = torch.randn((num_preds, num_classes), requires_grad=True).sigmoid()
+    input = torch.randn((num_preds, num_classes), requires_grad=True)
     target = torch.randint(0, num_classes, (1, num_preds)).flatten()
     target = F.one_hot(target, num_classes=num_classes)
     print("Input:", input, input.shape)
@@ -45,7 +52,7 @@ if __name__ == "__main__":
     print("\n\nTesting Binary Cross Entropy Loss")
     bce_loss = BCELoss()
 
-    input = torch.randn((num_preds, num_classes), requires_grad=True).sigmoid()
+    input = torch.randn((num_preds, num_classes), requires_grad=True)
     target = torch.randint(0, num_classes, (1, num_preds)).flatten()
     target = F.one_hot(target, num_classes=num_classes)
     print("Input:", input, input.shape)

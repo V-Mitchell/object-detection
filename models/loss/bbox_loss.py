@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+from torchvision.ops import generalized_box_iou_loss, distance_box_iou_loss
 
 
 class CIoULoss(nn.Module):
@@ -49,6 +50,22 @@ class CIoULoss(nn.Module):
 
         cious = ious - (rho2 / c2 + alpha * v)
         return 1 - cious.clamp(min=-1.0, max=1.0)
+
+
+class GIoULoss(nn.Module):
+    def __init__(self):
+        super(GIoULoss, self).__init__()
+
+    def forward(self, pred, target):
+        return generalized_box_iou_loss(pred, target, reduction="none")
+
+
+class DIoULoss(nn.Module):
+    def __init__(self):
+        super(DIoULoss, self).__init__()
+
+    def forward(self, pred, target):
+        return distance_box_iou_loss(pred, target, reduction="none")
 
 
 if __name__ == "__main__":
