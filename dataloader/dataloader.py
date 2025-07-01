@@ -151,8 +151,8 @@ DATASETS = {"YoloDataset": YoloDataset}
 def get_dataloader(cfg, validation=False):
     dataset = DATASETS[cfg["dataset"]](cfg["dataset_path"], cfg["image_size"], validation)
     return DataLoader(dataset,
-                      cfg["batch_size"],
-                      cfg["shuffle"],
+                      cfg["batch_size"] if not validation else 1,
+                      cfg["shuffle"] if not validation else False,
                       num_workers=cfg["num_workers"],
                       collate_fn=dataset.collate_fn,
                       pin_memory=cfg["pin_memory"],
