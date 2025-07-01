@@ -4,7 +4,6 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 import torch
-from torchvision.utils import save_image
 from dataloader.dataloader import get_dataloader
 from engine.optimizers import get_optimizer
 from engine.trainer_utils import TensorboardLogger, get_device, save_model
@@ -13,8 +12,8 @@ from models.detectors.simple_detector import SimpleDetector
 
 def weights_init(m):
     if isinstance(m, torch.nn.Conv2d):
-        torch.nn.init.kaiming_uniform_(m.weight)
-        torch.nn.init.zeros_(m.bias)
+        torch.nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
 
 
 def train_epoch(epoch, model, dataloader, optimizer, device):
@@ -25,9 +24,8 @@ def train_epoch(epoch, model, dataloader, optimizer, device):
     for i, data in enumerate(pbar):
         optimizer.zero_grad()
         images, labels = data
-        # save_image(images[0], "/home/lorrentz/git/object-detection/engine/deleteme/image.png")
         images = images.to(device=device)
-        images.requires_grad_()
+        # with torch.autocast(device_type="cuda"):
         preds = model(images)
         loss = model.module.loss(preds, labels)
         total_loss = loss["class"] + loss["obj"] + loss["bbox"]
@@ -56,7 +54,7 @@ def validate(model, dataloader, epoch, log_path):
     validation_path = os.path.join(dir_path, str(epoch) + ".jpg")
     images, labels = next(iter(dataloader))
     preds = model(images)
-    cls_preds, _, bbox_preds, _ = model.module.reshape_preds(preds)
+    cls_preds, obj_preds, bbox_preds, _ = model.module.post_process(preds)
     cls_labels, bbox_labels, _ = labels
     cv_img = (images.squeeze().numpy() * 255).astype(np.uint8)
     cv_img = np.transpose(cv_img, (1, 2, 0))
@@ -68,13 +66,15 @@ def validate(model, dataloader, epoch, log_path):
     for cls, bbox in zip(np_cls, np_bboxs):
         top_left = (int(bbox[0] * w), int(bbox[1] * h))
         bottom_right = (int(bbox[2] * w), int(bbox[3] * h))
-        cv2.rectangle(cv_img, top_left, bottom_right, (255, 0, 0), 2)
+        cv2.rectangle(cv_img, top_left, bottom_right, (0, 255, 0), 2)
 
     np_cls_preds = cls_preds.cpu().squeeze(0).numpy()
+    np_obj_preds = obj_preds.cpu().squeeze(0).numpy()
     np_bbox_preds = bbox_preds.cpu().squeeze(0).numpy()
-    for cls, bbox in zip(np_cls_preds, np_bbox_preds):
-        top_left = (int(bbox[0] * w), int(bbox[1] * h))
-        bottom_right = (int(bbox[2] * w), int(bbox[3] * h))
+    obj_mask = (np_obj_preds > 0.5).squeeze()
+    for cls, bbox in zip(np_cls_preds[obj_mask, :], np_bbox_preds[obj_mask, :]):
+        top_left = (int(bbox[0]), int(bbox[1]))
+        bottom_right = (int(bbox[2]), int(bbox[3]))
         cv2.rectangle(cv_img, top_left, bottom_right, (0, 0, 255), 1)
 
     cv2.imwrite(validation_path, cv_img)
@@ -86,7 +86,9 @@ def train(cfg):
         torch.cuda.device(device=device)
     model = SimpleDetector(cfg["model"]).to(device=device)
     model = torch.nn.DataParallel(module=model, device_ids=[device])
-    model = model.apply(weights_init)
+    model.apply(weights_init)
+    num_params = sum(p.numel() for p in model.module.parameters() if p.requires_grad)
+    print("Model Parameters: {params}".format(params=num_params))
 
     optimizer = get_optimizer(cfg["training"]["optimizer"], model.parameters())
     train_dataloader = get_dataloader(cfg["dataloader"])
