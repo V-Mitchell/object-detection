@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from models.network_registry import get_backbone, get_neck, get_head
 
 
@@ -17,6 +18,16 @@ class SimpleDetector(nn.Module):
 
     def loss(self, preds, labels):
         return self.head.loss(preds, labels)
+
+    def post_process(self, preds):
+        cls_preds, obj_preds, bbox_preds, coeff_preds = preds
+        bbox_preds = self.head.process_bbox(bbox_preds)
+        cls_preds, obj_preds, bbox_preds, coeff_preds = self.head.reshape_preds(
+            (cls_preds, obj_preds, bbox_preds, coeff_preds))
+        cls_preds = F.softmax(cls_preds, dim=-1)
+        obj_preds = F.sigmoid(obj_preds)
+        coeff_preds = F.sigmoid(coeff_preds)
+        return (cls_preds, obj_preds, bbox_preds, coeff_preds)
 
 
 if __name__ == "__main__":

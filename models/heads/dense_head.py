@@ -1,10 +1,180 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from models.heads.proto_net import ProtoNet
-from models.assigner.assigner import TaskAlignedAssigner
-from models.loss.class_loss import FocalLoss
-from models.loss.bbox_loss import CIoULoss
+from models.assigner.assigner import TaskAlignedAssigner, SimOTAssigner
+from models.loss.class_loss import BCELoss, FocalLoss
+from models.loss.bbox_loss import CIoULoss, GIoULoss
 from models.loss.mask_loss import DiceLoss
+
+
+class AnchorlessHead(nn.Module):
+    def __init__(self,
+                 num_classes,
+                 input_channels=[64, 128, 256, 512],
+                 num_prototypes=8,
+                 bg_index=0,
+                 image_size=[640, 640]):
+        super(AnchorlessHead, self).__init__()
+        self.num_classes = num_classes
+        self.num_prototypes = num_prototypes
+        self.image_size = image_size
+        self.grids = None
+
+        self.assigner = SimOTAssigner(num_classes, image_size)
+
+        self.cls_loss = FocalLoss()
+        self.obj_loss = BCELoss()
+        self.bbox_loss = GIoULoss()
+        self.mask_loss = DiceLoss(sigmoid=False)
+
+        self.conv_cls = nn.ModuleList()
+        self.conv_obj = nn.ModuleList()
+        self.conv_reg = nn.ModuleList()
+        self.conv_coeff = nn.ModuleList()
+        self.relu = nn.ReLU()
+        for ch in input_channels:
+            self.conv_cls.append(
+                nn.Sequential(*[
+                    nn.Conv2d(ch, num_classes, kernel_size=3, stride=1, padding=1),
+                    nn.BatchNorm2d(num_classes), self.relu
+                ]))
+            self.conv_obj.append(
+                nn.Sequential(*[
+                    nn.Conv2d(ch, 1, kernel_size=3, stride=1, padding=1),
+                    nn.BatchNorm2d(1), self.relu
+                ]))
+            self.conv_reg.append(
+                nn.Sequential(*[
+                    nn.Conv2d(ch, 4, kernel_size=3, stride=1, padding=1),
+                    nn.BatchNorm2d(4), self.relu
+                ]))
+            self.conv_coeff.append(
+                nn.Sequential(*[
+                    nn.Conv2d(ch, num_prototypes, kernel_size=3, stride=1, padding=1),
+                    nn.BatchNorm2d(num_prototypes), self.relu
+                ]))
+
+    def forward(self, x):
+        cls_preds = []
+        obj_preds = []
+        reg_preds = []
+        coeff_preds = []
+        for i, feat in enumerate(x):
+            cls_preds.append(self.conv_cls[i](feat))
+            obj_preds.append(self.conv_obj[i](feat))
+            reg_preds.append(self.conv_reg[i](feat))
+            coeff_preds.append(self.conv_coeff[i](feat))
+
+        return (tuple(cls_preds), tuple(obj_preds), tuple(reg_preds), tuple(coeff_preds))
+
+    def build_grids(self, bbox_preds):
+        """
+        build detection grid for each feature pyramid level in image space coords
+        return: tuple grids for each feature pyramid level of (cx, cy, cx, cy) format
+        """
+        grids = []
+        device = bbox_preds[0].device
+        for bbox_pred in bbox_preds:
+            _, _, row, col = bbox_pred.shape
+            stride = self.image_size[0] / row
+            grid = torch.zeros((4, row, col)).to(device)
+            xidx = torch.arange(row).view(1, row).expand(row, col).to(device)
+            yidx = torch.arange(col).view(col, 1).expand(row, col).to(device)
+            grid[0] = xidx
+            grid[1] = yidx
+            grid[2] = xidx
+            grid[3] = yidx
+            grid = grid.float()
+            grid += 0.5  # add 0.5 to shift center grid to the middle of the cells
+            # feature space to image space encoding formula (s/2 + xs, s/2 + ys)
+            grid *= stride
+            # grid += (stride / 2) # why do this?
+            grids.append(grid)
+        return tuple(grids)
+
+    def process_bbox(self, bbox_preds):
+        """
+        normalize and convert bbox encodings from [l,t,r,b] -> [x0,y0,x1,y1]
+        [x - l, y - t, x + r, y + b]
+        """
+        if self.grids == None:
+            self.grids = self.build_grids(bbox_preds)
+        proc_bbox_preds = []
+        for bbox_pred, grid in zip(bbox_preds, self.grids):
+            bbox_pred = F.sigmoid(bbox_pred)
+            bbox_pred = torch.cat([(bbox_pred[:, 0, :, :] * self.image_size[0]).unsqueeze(1),
+                                   (bbox_pred[:, 1, :, :] * self.image_size[1]).unsqueeze(1),
+                                   (bbox_pred[:, 2, :, :] * self.image_size[0]).unsqueeze(1),
+                                   (bbox_pred[:, 3, :, :] * self.image_size[1]).unsqueeze(1)],
+                                  dim=1)
+            bbox_pred = torch.cat([bbox_pred[:, 0:2, :, :] * -1.0, bbox_pred[:, 2:, :, :]], dim=1)
+            bbox_pred = bbox_pred + grid
+            proc_bbox_preds.append(bbox_pred)
+        return tuple(proc_bbox_preds)
+
+    def reshape_preds(self, preds):
+        cls_preds, obj_preds, bbox_preds, coeff_preds = preds
+        batch_size, _, _, _ = cls_preds[0].shape
+        cls_preds = torch.cat([
+            cls_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, self.num_classes)
+            for cls_pred in cls_preds
+        ], 1)
+        obj_preds = torch.cat(
+            [obj_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, 1) for obj_pred in obj_preds], 1)
+        bbox_preds = torch.cat(
+            [bbox_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, 4) for bbox_pred in bbox_preds],
+            1)
+        coeff_preds = torch.cat([
+            coeff_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, self.num_prototypes)
+            for coeff_pred in coeff_preds
+        ], 1)
+        return (cls_preds, obj_preds, bbox_preds, coeff_preds)
+
+    def loss(self, preds, labels):
+        cls_preds, obj_preds, bbox_preds, coeff_preds = preds
+        bbox_preds = self.process_bbox(bbox_preds)
+        cls_preds, obj_preds, bbox_preds, coeff_preds = self.reshape_preds(
+            (cls_preds, obj_preds, bbox_preds, coeff_preds))
+        device = cls_preds.device
+        batches, _, _ = cls_preds.shape
+        cls_labels, bbox_labels, mask_labels = labels
+        cls_losses = []
+        obj_losses = []
+        bbox_losses = []
+        mask_losses = []
+        for batch in range(batches):
+            cls_pred = cls_preds[batch]
+            obj_pred = obj_preds[batch]
+            bbox_pred = bbox_preds[batch]
+            coeff_pred = coeff_preds[batch]
+            cls_label = cls_labels[batch].to(device)
+            bbox_label = bbox_labels[batch].to(device)
+            mask_label = mask_labels[batch].to(device)
+            # we want to assign each prediction with an optimal ground truth label or a background label
+            # assignment strategy will assign the predictions with their optimal ground truths
+            # class, bbox, and mask loss are calculated on the assignment result
+            assigned_cls, assigned_obj, assigned_bbox, matched_gt_idxs, matched_fg_mask = self.assigner(
+                cls_pred, obj_pred, bbox_pred, self.grids, cls_label, bbox_label)
+
+            # we will only calculate the loss for positive matches between predictions and ground truths
+            if matched_gt_idxs.dim() == 0:
+                cls_losses.append(self.cls_loss(cls_pred, assigned_cls).unsqueeze(0))
+                obj_losses.append(self.obj_loss(obj_pred, assigned_obj).unsqueeze(0))
+                bbox_losses.append(torch.zeros((1), dtype=torch.float, device=device))
+            else:
+                cls_losses.append(
+                    self.cls_loss(cls_pred[matched_fg_mask], assigned_cls).unsqueeze(0))
+                obj_losses.append(self.obj_loss(obj_pred, assigned_obj).unsqueeze(0))
+                bbox_losses.append(self.bbox_loss(bbox_pred[matched_fg_mask], assigned_bbox))
+                # mask_losses.append(self.mask_loss(mask_pred, mask_assign))
+
+        loss = dict()
+        loss["class"] = torch.cat(cls_losses, dim=0).mean()
+        loss["obj"] = torch.cat(obj_losses, dim=0).mean()
+        loss["bbox"] = torch.cat(bbox_losses, dim=0).mean() * 5.0
+        # loss["mask"] = torch.cat(mask_losses, 0).mean()
+        return loss
 
 
 class DenseHead(nn.Module):
@@ -23,10 +193,10 @@ class DenseHead(nn.Module):
                                    stacked_convs=4,
                                    num_levels=3,
                                    num_prototypes=num_prototypes)
-        self.assigner = TaskAlignedAssigner(num_classes, bg_index, num_prototypes)
-        self.cls_loss = FocalLoss()
+        self.assigner = TaskAlignedAssigner(num_classes)
+        self.cls_loss = BCELoss()
         self.bbox_loss = CIoULoss()
-        self.mask_loss = DiceLoss(False)
+        self.mask_loss = DiceLoss(sigmoid=False)
 
         cls_convs = []
         reg_convs = []
@@ -51,7 +221,7 @@ class DenseHead(nn.Module):
                       stride=1,
                       padding=1))
         # Normalize output
-        cls_convs.append(nn.Sigmoid())
+        cls_convs.append(nn.Softmax(dim=1))
         reg_convs.append(nn.Sigmoid())
         coeff_convs.append(nn.Sigmoid())
 
@@ -78,7 +248,7 @@ class DenseHead(nn.Module):
             coeff_preds.append(coeff_pred)
         return (tuple(cls_preds), tuple(bbox_preds), tuple(coeff_preds), prototypes)
 
-    def loss(self, preds, labels):
+    def reshape_preds(self, preds):
         cls_preds, bbox_preds, coeff_preds, prototypes = preds
         batch_size, _, _, _ = cls_preds[0].shape
         cls_preds = torch.cat([
@@ -92,6 +262,10 @@ class DenseHead(nn.Module):
             coeff_pred.permute(0, 2, 3, 1).reshape(batch_size, -1, self.num_prototypes)
             for coeff_pred in coeff_preds
         ], 1)
+        return (cls_preds, bbox_preds, coeff_preds, prototypes)
+
+    def loss(self, preds, labels):
+        cls_preds, bbox_preds, coeff_preds, prototypes = self.reshape_preds(preds)
         device = cls_preds.device
         cls_labels, bbox_labels, mask_labels = labels
         cls_losses = []
@@ -102,6 +276,11 @@ class DenseHead(nn.Module):
                                 bbox_labels, mask_labels):
             cls_label = cls_label.to(device)
             bbox_label = bbox_label.to(device)
+            if mask_label.shape[0] > 0:
+                mask_label = F.interpolate(mask_label.unsqueeze(0),
+                                           scale_factor=0.25,
+                                           mode="bilinear",
+                                           align_corners=True).squeeze(dim=0)
             mask_label = mask_label.to(device)
             assigned_label_idx, assigned_label, assigned_cls, assigned_bbox = self.assigner(
                 cls_pred, bbox_pred, cls_label, bbox_label)
@@ -111,6 +290,8 @@ class DenseHead(nn.Module):
                                                                coeff_pred[positive_mask]).permute(
                                                                    (2, 0, 1))
             positive_assigned_mask = mask_label[assigned_label_idx[positive_mask]]
+            # try calculating the loss only for positive matches
+            # different weighing of the loss between positive and negative predictions
             cls_losses.append(self.cls_loss(cls_pred, assigned_cls).unsqueeze(0))
             bbox_losses.append(self.bbox_loss(bbox_pred, assigned_bbox).unsqueeze(0))
             mask_losses.append(
@@ -157,8 +338,8 @@ if __name__ == "__main__":
     bbox_gt = torch.Tensor(
         np.array([[40, 40, 100, 100], [100, 40, 120, 60], [60, 40, 100, 100], [260, 260, 360, 360],
                   [260, 60, 300, 300], [260, 300, 360, 400], [500, 500, 600, 600],
-                  [460, 200, 500, 500], [500, 560, 520, 600], [200, 460, 220,
-                                                               600]])).float().unsqueeze(dim=0)
+                  [460, 200, 500, 500], [500, 560, 520, 600], [200, 460, 220, 600]
+                  ])).float().unsqueeze(dim=0) / 640.0
     mask_gt = torch.zeros((10, 160, 160), dtype=torch.float)
     mask_gt[0, 10:25, 10:25] = 1.0
     mask_gt[1, 25:30, 10:15] = 1.0
