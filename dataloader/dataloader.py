@@ -5,7 +5,6 @@ from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.functional import resize
 import numpy as np
 import cv2
-from utils.bbox import xywh2xyxy
 
 
 def xyxy2Mask(xyxy, width, height):
@@ -57,7 +56,7 @@ def letterbox(image, bbox, mask, letter_size, color=(1.0, 1.0, 1.0)):
             right_mask_pad = torch.zeros((l, letter_height, pad_pixels), dtype=mask.dtype)
             padded_mask = torch.cat((left_mask_pad, resized_mask, right_mask_pad), dim=-1)
             bbox[:, 0] = ((bbox[:, 0] * new_width) + pad_pixels) / letter_width
-            bbox[:, 2] = (bbox[:, 2] * new_width) / letter_width
+            bbox[:, 2] = ((bbox[:, 2] * new_width) + pad_pixels) / letter_width
     else:
         pad_pixels = int((letter_height - height) / 2)
         odd_pixel = 0 if height + pad_pixels * 2 == letter_height else 1
@@ -72,7 +71,7 @@ def letterbox(image, bbox, mask, letter_size, color=(1.0, 1.0, 1.0)):
             bottom_mask_pad = torch.zeros((l, pad_pixels, letter_width), dtype=mask.dtype)
             padded_mask = torch.cat((top_mask_pad, resized_mask, bottom_mask_pad), dim=-2)
             bbox[:, 1] = ((bbox[:, 1] * new_height) + pad_pixels) / letter_height
-            bbox[:, 3] = (bbox[:, 3] * new_height) / letter_height
+            bbox[:, 3] = ((bbox[:, 3] * new_height) + pad_pixels) / letter_height
 
     if not process_labels:
         padded_mask = mask
@@ -80,9 +79,9 @@ def letterbox(image, bbox, mask, letter_size, color=(1.0, 1.0, 1.0)):
     return padded_image, bbox, padded_mask
 
 
-class YoloDataset(Dataset):
+class MSCOCODataset(Dataset):
     def __init__(self, dataset_path, image_size, validation=False):
-        super().__init__()
+        super(MSCOCODataset).__init__()
         self.image_size = image_size
         if validation:
             dataset_path = os.path.join(dataset_path, "val/")
@@ -107,16 +106,22 @@ class YoloDataset(Dataset):
 
         object_classes = []
         object_bboxs = []
-        object_mask = []
+        object_masks = []
         for object_label in object_labels:
-            label_split = object_label.strip().split(' ')
+            label_split = object_label.strip().split('/')
             object_classes.append(int(label_split[0]))
-            x, y, w, h = map(float, label_split[1:5])
-            object_bboxs.append([x, y, w, h])
-            object_mask.append(xyxy2Mask([x for x in map(float, label_split[5:])], width, height))
+            xmin, ymin, xmax, ymax = map(float, label_split[1].split(' '))
+            object_bboxs.append([xmin, ymin, xmax, ymax])
+            masks = []
+            for segment in label_split[2:]:
+                masks.append(
+                    torch.Tensor(
+                        xyxy2Mask([x for x in map(float, segment.split(' '))], width,
+                                  height)).to(torch.float32).unsqueeze(0))
+            object_masks.append(torch.sum(torch.concat(masks, dim=0), dim=0))
         labels = (torch.Tensor(object_classes).to(torch.int32),
                   torch.Tensor(object_bboxs).to(torch.float32),
-                  torch.Tensor(np.array(object_mask)).to(torch.float32))
+                  torch.Tensor(np.array(object_masks)).to(torch.float32))
         return (image, labels)
 
     def collate_fn(self, batch):
@@ -128,8 +133,6 @@ class YoloDataset(Dataset):
             image, labels = x
             classes, bboxs, masks = labels
             image, bboxs, masks = letterbox(image, bboxs, masks, self.image_size)
-            if bboxs.numel() > 0:
-                bboxs = xywh2xyxy(bboxs)
             batch_images.append(image.unsqueeze(dim=0))
             batch_classes.append(classes)
             batch_bboxs.append(bboxs)
@@ -145,7 +148,7 @@ class YoloDataset(Dataset):
         return self.loadData(self.image_paths[index], self.label_paths[index])
 
 
-DATASETS = {"YoloDataset": YoloDataset}
+DATASETS = {"MSCOCODataset": MSCOCODataset}
 
 
 def get_dataloader(cfg, validation=False):
@@ -162,7 +165,6 @@ def get_dataloader(cfg, validation=False):
 
 if __name__ == "__main__":
     import argparse
-    import uuid
     from utils.visualize_labels import draw_object_labels
     from torch.utils.data import DataLoader
 
@@ -178,19 +180,21 @@ if __name__ == "__main__":
                         type=bool,
                         action=argparse.BooleanOptionalAction,
                         default=False)
-    parser.add_argument('-n', '--num_labels', default=10)
+    parser.add_argument('-n', '--num_labels', default=100)
     parser.add_argument('--width', default=640)
     parser.add_argument('--height', default=640)
     args = parser.parse_args()
-    dataset = YoloDataset(args.dataset, [args.height, args.width], args.validation)
+
+    dataset = MSCOCODataset(args.dataset, [args.height, args.width], args.validation)
     dataloader = DataLoader(dataset, batch_size=4, collate_fn=dataset.collate_fn)
+
     if args.visualize:
         os.makedirs("results/", exist_ok=True)
     for i, data in enumerate(dataloader):
         image, labels = data
         classes, bboxs, masks = labels
         if args.visualize:
-            save_path = os.path.join("results", uuid.uuid4().hex + ".jpg")
+            save_path = os.path.join("results", str(i) + ".jpg")
             draw_object_labels(save_path, image[0], classes[0], bboxs[0], masks[0])
 
         if i == args.num_labels:

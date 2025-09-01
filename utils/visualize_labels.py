@@ -22,8 +22,8 @@ def draw_object_labels(save_path, img, classes, bboxs, masks):
     np_masks = (masks.numpy() * 255).astype(np.uint8)
 
     for cls, bbox, mask in zip(np_classes, np_bboxs, np_masks):
-        top_left = (int((bbox[0] - bbox[2] / 2) * w), int((bbox[1] - bbox[3] / 2) * h))
-        bottom_right = (int((bbox[0] + bbox[2] / 2) * w), int((bbox[1] + bbox[3] / 2) * h))
+        top_left = (int(bbox[0] * w), int(bbox[1] * h))
+        bottom_right = (int(bbox[2] * w), int(bbox[3] * h))
         cv2.rectangle(cv_img, top_left, bottom_right, (255, 0, 0), 1)
         cv2.putText(cv_img, str(cls), top_left, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, 2)
         draw_mask(cv_img, mask, 0.5)
