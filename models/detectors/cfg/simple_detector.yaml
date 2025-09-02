@@ -1,0 +1,18 @@
+model:
+  backbone:
+    network: "ResNet50"
+  neck:
+    network: "FPN"
+    expansion: 4
+    in_channels_list: [64, 128, 256, 512]
+    out_channels: 256
+  head:
+    network: "DenseHead"
+    num_classes: 80
+    num_priors: 1
+    input_channels: 256
+    feat_channels: 256
+    stacked_convs: 2
+    num_prototypes: 8
+    bg_index: 0
+    image_size: [640, 640]

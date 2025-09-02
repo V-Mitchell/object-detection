@@ -1,142 +1,227 @@
-from typing import List, Dict
+import torch
 from torch import nn
-from torch import Tensor
 import torch.nn.functional as F
-from models.blocks.core_blocks import Conv2dModule
+
+
+class PANet(nn.Module):
+    def __init__(self, expansion, input_channels=[64, 128, 256, 512]):
+        super(PANet, self).__init__()
+
+        self.relu = nn.ReLU()
+        self.p0_lat_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[0] * expansion + input_channels[1] * expansion,
+                      input_channels[0] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[0] * expansion), self.relu
+        ])
+        self.p1_lat_conv1 = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion + input_channels[2] * expansion,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p2_lat_conv1 = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion + input_channels[3] * expansion,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p1_lat_conv2 = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion * 2,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p2_lat_conv2 = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion * 2,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p3_lat_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[3] * expansion * 2,
+                      input_channels[3] * expansion,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[3] * expansion), self.relu
+        ])
+
+        self.p0_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[0] * expansion,
+                      input_channels[1] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[1] * expansion), self.relu
+        ])
+        self.p1_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[1] * expansion,
+                      input_channels[2] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[2] * expansion), self.relu
+        ])
+        self.p2_down_conv = nn.Sequential(*[
+            nn.Conv2d(input_channels[2] * expansion,
+                      input_channels[3] * expansion,
+                      kernel_size=3,
+                      stride=2,
+                      padding=1),
+            nn.BatchNorm2d(input_channels[3] * expansion), self.relu
+        ])
+
+    def forward(self, feats):
+        x0, x1, x2, x3 = feats
+
+        p2_lat = torch.cat(
+            (x2, F.interpolate(x3, scale_factor=2, mode="bilinear", align_corners=True)), dim=1)
+        p2_lat = self.p2_lat_conv1(p2_lat)
+        p1_lat = torch.cat(
+            (x1, F.interpolate(p2_lat, scale_factor=2, mode="bilinear", align_corners=True)),
+            dim=1)
+        p1_lat = self.p1_lat_conv1(p1_lat)
+        p0_lat = torch.cat(
+            (x0, F.interpolate(p1_lat, scale_factor=2, mode="bilinear", align_corners=True)),
+            dim=1)
+        p0 = self.p0_lat_conv(p0_lat)
+
+        p1_lat = torch.cat((p1_lat, self.p0_down_conv(p0)), dim=1)
+        p1 = self.p1_lat_conv2(p1_lat)
+        p2_lat = torch.cat((p2_lat, self.p1_down_conv(p1)), dim=1)
+        p2 = self.p2_lat_conv2(p2_lat)
+        p3_lat = torch.cat((x3, self.p2_down_conv(p2)), dim=1)
+        p3 = self.p3_lat_conv(p3_lat)
+
+        return (p0, p1, p2, p3)
 
 
 class FPN(nn.Module):
-
-    def __init__(
-        self,
-        in_channels: List[int],
-        out_channels: int,
-        no_norm_on_lateral: bool = False,
-        norm: nn.Module = None,
-        act: nn.Module = None,
-        upsample_cfg=dict(mode='nearest')) -> None:
+    def __init__(self, expansion, input_channels=[64, 128, 256, 512], out_channels=256):
         super(FPN, self).__init__()
-        assert isinstance(in_channels, list)
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.no_norm_on_lateral = no_norm_on_lateral
-        self.upsample_cfg = upsample_cfg.copy()
 
-        self.lateral_convs = nn.ModuleList()
-        self.fpn_convs = nn.ModuleList()
+        self.p4 = nn.MaxPool2d(kernel_size=1, stride=2, padding=0)
+        self.p3 = nn.Sequential(
+            nn.Conv2d(input_channels[3] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p2_lat = nn.Sequential(
+            nn.Conv2d(input_channels[2] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p1_lat = nn.Sequential(
+            nn.Conv2d(input_channels[1] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p0_lat = nn.Sequential(
+            nn.Conv2d(input_channels[0] * expansion,
+                      out_channels,
+                      kernel_size=1,
+                      stride=1,
+                      padding=0))
+        self.p2_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
+        self.p1_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
+        self.p0_smth = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1))
 
-        used_backbone_levels = len(in_channels)
-        for i in range(used_backbone_levels):
-            l_conv = Conv2dModule(
-                in_channels[i],
-                out_channels,
-                1,
-                norm=norm if not self.no_norm_on_lateral else None,
-                act=act)
-            fpn_conv = Conv2dModule(out_channels,
-                                    out_channels,
-                                    3,
-                                    padding=1,
-                                    norm=norm,
-                                    act=act)
+    def upsample_add(self, x, y):
+        return F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True) + y
 
-            self.lateral_convs.append(l_conv)
-            self.fpn_convs.append(fpn_conv)
-
-    def forward(self, inputs: Dict[str, Tensor]) -> Dict[str, Tensor]:
-        assert len(inputs) == len(self.in_channels)
-
-        x = list(inputs.values())
-        # lateral path
-        laterals = [
-            lateral_conv(x[i])
-            for i, lateral_conv in enumerate(self.lateral_convs)
-        ]
-
-        # top-down path
-        used_backbone_levels = len(laterals)
-        for i in range(used_backbone_levels - 1, 0, -1):
-            # In some cases, fixing `scale factor` (e.g. 2) is preferred, but
-            #  it cannot co-exist with `size` in `F.interpolate`.
-            if 'scale_factor' in self.upsample_cfg:
-                laterals[i - 1] = laterals[i - 1] + F.interpolate(
-                    laterals[i], **self.upsample_cfg)
-            else:
-                prev_shape = laterals[i - 1].shape[2:]
-                laterals[i - 1] = laterals[i - 1] + F.interpolate(
-                    laterals[i], size=prev_shape, **self.upsample_cfg)
-
-        # output path
-        outs = [
-            self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
-        ]
-        inputs.update(zip(inputs, outs))
-        return inputs
+    def forward(self, feats):
+        x0, x1, x2, x3 = feats
+        p3 = self.p3(x3)
+        p4 = self.p4(p3)
+        p2 = self.upsample_add(p3, self.p2_lat(x2))
+        p1 = self.upsample_add(p2, self.p1_lat(x1))
+        p0 = self.upsample_add(p1, self.p0_lat(x0))
+        p2 = self.p2_smth(p2)
+        p1 = self.p2_smth(p1)
+        p0 = self.p2_smth(p0)
+        return (p0, p1, p2, p3, p4)
 
 
-class PAFPN(FPN):
+if __name__ == "__main__":
+    import numpy as np
 
-    def __init__(self,
-                 in_channels: List[int],
-                 out_channels: int,
-                 no_norm_on_lateral: bool = False,
-                 norm: nn.Module = None,
-                 act: nn.Module = None) -> None:
-        super(PAFPN, self).__init__(in_channels, out_channels,
-                                    no_norm_on_lateral, norm, act)
-        # add extra bottom up pathway
-        self.downsample_convs = nn.ModuleList()
-        self.pafpn_convs = nn.ModuleList()
-        used_backbone_levels = len(in_channels)
-        for _ in range(used_backbone_levels):
-            d_conv = Conv2dModule(out_channels,
-                                  out_channels,
-                                  3,
-                                  stride=2,
-                                  padding=1,
-                                  norm=norm,
-                                  act=act)
-            pafpn_conv = Conv2dModule(out_channels,
-                                      out_channels,
-                                      3,
-                                      padding=1,
-                                      norm=norm,
-                                      act=act)
-            self.downsample_convs.append(d_conv)
-            self.pafpn_convs.append(pafpn_conv)
+    expansion = 1
+    x0 = torch.Tensor(np.zeros((1, 64, 160, 160)))
+    x1 = torch.Tensor(np.zeros((1, 128, 80, 80)))
+    x2 = torch.Tensor(np.zeros((1, 256, 40, 40)))
+    x3 = torch.Tensor(np.zeros((1, 512, 20, 20)))
+    print("Testing FPN with input shapes:")
+    print("x0 {shape}".format(shape=x0.shape))
+    print("x1 {shape}".format(shape=x1.shape))
+    print("x2 {shape}".format(shape=x2.shape))
+    print("x3 {shape}\n".format(shape=x3.shape))
+    fpn = FPN(expansion)
+    input = (x0, x1, x2, x3)
+    output = fpn(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
 
-    def forward(self, inputs: Dict[str, Tensor]) -> Dict[str, Tensor]:
-        assert len(inputs) == len(self.in_channels)
+    expansion = 4
+    x0 = torch.Tensor(np.zeros((1, 256, 160, 160)))
+    x1 = torch.Tensor(np.zeros((1, 512, 80, 80)))
+    x2 = torch.Tensor(np.zeros((1, 1024, 40, 40)))
+    x3 = torch.Tensor(np.zeros((1, 2048, 20, 20)))
+    print("\nTesting FPN with input shapes:")
+    print("x0 {shape}".format(shape=x0.shape))
+    print("x1 {shape}".format(shape=x1.shape))
+    print("x2 {shape}".format(shape=x2.shape))
+    print("x3 {shape}\n".format(shape=x3.shape))
+    fpn = FPN(expansion)
+    input = (x0, x1, x2, x3)
+    output = fpn(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
 
-        x = list(inputs.values())
-        # lateral paths
-        laterals = [
-            lateral_conv(x[i])
-            for i, lateral_conv in enumerate(self.lateral_convs)
-        ]
+    expansion = 1
+    x0 = torch.Tensor(np.zeros((1, 64, 160, 160)))
+    x1 = torch.Tensor(np.zeros((1, 128, 80, 80)))
+    x2 = torch.Tensor(np.zeros((1, 256, 40, 40)))
+    x3 = torch.Tensor(np.zeros((1, 512, 20, 20)))
+    print("Testing PANet with input shapes:")
+    print("x0 {shape}".format(shape=x0.shape))
+    print("x1 {shape}".format(shape=x1.shape))
+    print("x2 {shape}".format(shape=x2.shape))
+    print("x3 {shape}\n".format(shape=x3.shape))
+    fpn = PANet(expansion)
+    input = (x0, x1, x2, x3)
+    output = fpn(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))
 
-        # top-down path
-        used_backbone_levels = len(laterals)
-        for i in range(used_backbone_levels - 1, 0, -1):
-            prev_shape = laterals[i - 1].shape[2:]
-            laterals[i - 1] = laterals[i - 1] + F.interpolate(
-                laterals[i], size=prev_shape, mode='nearest')
-
-        # output paths
-        inter_outs = [
-            self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
-        ]
-
-        # bottom-up path
-        for i in range(0, used_backbone_levels - 1):
-            inter_outs[i + 1] += self.downsample_convs[i](inter_outs[i])
-
-        outs = []
-        outs.append(inter_outs[0])
-        outs.extend([
-            self.pafpn_convs[i - 1](inter_outs[i])
-            for i in range(1, used_backbone_levels)
-        ])
-
-        inputs.update(zip(inputs, outs))
-        return inputs
+    expansion = 4
+    x0 = torch.Tensor(np.zeros((1, 256, 160, 160)))
+    x1 = torch.Tensor(np.zeros((1, 512, 80, 80)))
+    x2 = torch.Tensor(np.zeros((1, 1024, 40, 40)))
+    x3 = torch.Tensor(np.zeros((1, 2048, 20, 20)))
+    print("\nTesting PANet with input shapes:")
+    print("x0 {shape}".format(shape=x0.shape))
+    print("x1 {shape}".format(shape=x1.shape))
+    print("x2 {shape}".format(shape=x2.shape))
+    print("x3 {shape}\n".format(shape=x3.shape))
+    fpn = PANet(expansion)
+    input = (x0, x1, x2, x3)
+    output = fpn(input)
+    for i, x in enumerate(output):
+        print("Feature{num} Shape: {shape}".format(num=i, shape=x.shape))

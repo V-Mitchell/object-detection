@@ -36,3 +36,7 @@ build/*
 
 # Log
 *log*/*
+
+*pycache*
+*log*
+*results*

@@ -1,0 +1,37 @@
+model:
+  backbone:
+    network: "ResNet18"
+  neck:
+    network: "PANet"
+    expansion: 1
+    input_channels: [64, 128, 256, 512]
+  head:
+    network: "AnchorlessHead"
+    num_classes: 80
+    input_channels: [64, 128, 256, 512]
+    num_prototypes: 8
+    image_size: [640, 640]
+
+dataloader:
+  dataset: "MSCOCODataset"
+  dataset_path: "/home/lorrentz/DATA/coco/"
+  image_size: [640, 640]
+  batch_size: 16
+  shuffle: True
+  num_workers: 4
+  pin_memory: False
+  drop_last: True
+  persistent_workers: False
+
+training:
+  epochs: 100
+  validate_period: 0
+  device: 0
+  log_path: "./log"
+  log_name: "resnet18_sgd_01lr"
+  deterministic: True
+  optimizer:
+    type: "SGD"
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0001
