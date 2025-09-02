@@ -7,17 +7,16 @@ model:
     input_channels: [64, 128, 256, 512]
   head:
     network: "AnchorlessHead"
-    num_classes: 90
+    num_classes: 80
     input_channels: [64, 128, 256, 512]
     num_prototypes: 8
-    bg_index: 0
     image_size: [640, 640]
 
 dataloader:
-  dataset: "YoloDataset"
+  dataset: "MSCOCODataset"
   dataset_path: "/home/lorrentz/DATA/coco/"
   image_size: [640, 640]
-  batch_size: 2
+  batch_size: 16
   shuffle: True
   num_workers: 4
   pin_memory: False
@@ -26,12 +25,13 @@ dataloader:
 
 training:
   epochs: 100
-  validate_period: True
+  validate_period: 0
   device: 0
   log_path: "./log"
+  log_name: "resnet18_sgd_01lr"
+  deterministic: True
   optimizer:
-    type: "AdamW"
-    lr: 0.005
-    betas: [0.9, 0.999]
-    eps: 0.00000001
-    weight_decay: 0.01
+    type: "SGD"
+    lr: 0.1
+    momentum: 0.9
+    weight_decay: 0.0001

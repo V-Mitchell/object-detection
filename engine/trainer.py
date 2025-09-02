@@ -5,20 +5,19 @@ import yaml
 from tqdm import tqdm
 import torch
 from dataloader.dataloader import get_dataloader
-from engine.optimizers import get_optimizer
-from engine.trainer_utils import TensorboardLogger, get_device, save_model
+from engine.optimizers import get_optimizer, get_scheduler
+from engine.trainer_utils import TrainingLogger, get_device
 from models.detectors.simple_detector import SimpleDetector
 
 
 def weights_init(m):
     if isinstance(m, torch.nn.Conv2d):
-        torch.nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.01)
+        torch.nn.init.kaiming_uniform_(m.weight)
+        if m.bias is not None:
+            m.bias.data.fill_(0.01)
 
 
-def train_epoch(epoch, model, dataloader, optimizer, device):
-    accum_num = 0
-    accum_loss = {"class_loss": 0.0, "obj_loss": 0.0, "bbox_loss": 0.0}
+def train_epoch(epoch, model, dataloader, optimizer, device, logger):
     last_loss = 0.0
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} - Loss {last_loss}")
     for i, data in enumerate(pbar):
@@ -32,22 +31,21 @@ def train_epoch(epoch, model, dataloader, optimizer, device):
         total_loss.backward()
         optimizer.step()
 
-        accum_loss["class_loss"] += loss["class"].item()
-        accum_loss["obj_loss"] += loss["obj"].item()
-        accum_loss["bbox_loss"] += loss["bbox"].item()
-        accum_num += 1
+        if i % 100 == 0:
+            metrics = {
+                "class_loss": loss["class"].item(),
+                "obj_loss": loss["obj"].item(),
+                "bbox_loss": loss["bbox"].item(),
+                "total_loss": total_loss.item()
+            }
+            logger.log_dict(metrics)
+
         last_loss = total_loss.item()
         pbar.set_description(f"Epoch {epoch} - Loss {last_loss}")
 
-    accum_loss["class_loss"] = accum_loss["class_loss"] / accum_num
-    accum_loss["obj_loss"] = accum_loss["obj_loss"] / accum_num
-    accum_loss["bbox_loss"] = accum_loss["bbox_loss"] / accum_num
-    accum_loss[
-        "total_loss"] = accum_loss["class_loss"] + accum_loss["obj_loss"] + accum_loss["bbox_loss"]
-    return accum_loss
-
 
 def validate(model, dataloader, epoch, log_path):
+    model.eval()
     dir_path = os.path.join(log_path, "validation")
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
@@ -81,9 +79,16 @@ def validate(model, dataloader, epoch, log_path):
 
 
 def train(cfg):
+    if cfg["training"]["deterministic"]:
+        seed = 0xffff_ffff_ffff_ffff
+        torch.manual_seed(seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
     device = get_device(cfg["training"]["device"], cfg["dataloader"]["batch_size"])
     if device != torch.device("cpu"):
         torch.cuda.device(device=device)
+
     model = SimpleDetector(cfg["model"]).to(device=device)
     model = torch.nn.DataParallel(module=model, device_ids=[device])
     model.apply(weights_init)
@@ -91,25 +96,41 @@ def train(cfg):
     print("Model Parameters: {params}".format(params=num_params))
 
     optimizer = get_optimizer(cfg["training"]["optimizer"], model.parameters())
+    scheduler = None
+    if "scheduler" in cfg["training"]:
+        scheduler = get_scheduler(cfg["training"]["scheduler"], optimizer)
+
     train_dataloader = get_dataloader(cfg["dataloader"])
     val_dataloader = get_dataloader(cfg["dataloader"], True)
 
-    logger = TensorboardLogger(cfg["training"]["log_path"])
+    logger = TrainingLogger(cfg["training"]["log_path"], cfg["training"]["log_name"])
+    logger.save_cfg(cfg["cfg_path"])
 
+    model.train()
     for epoch in range(cfg["training"]["epochs"]):
-        model.train(True)
-        loss = train_epoch(epoch, model, train_dataloader, optimizer, device)
-        if cfg["training"]["validate_period"]:
-            model.eval()
-            # save_model(model.module.state_dict(), epoch, logger.get_log_path())
+        train_epoch(epoch, model, train_dataloader, optimizer, device, logger)
+        if cfg["training"][
+                "validate_period"] > 0 and epoch % cfg["training"]["validate_period"] == 0:
             with torch.no_grad():
                 validate(model, val_dataloader, epoch, logger.get_log_path())
+            logger.save_checkpoint(epoch, model)
 
-        # log losses
-        logger.log_dict(loss, epoch)
+        if scheduler is not None:
+            logger.log_dict({"lr": scheduler.get_last_lr()[0]})
+            scheduler.step()
+
+    validate(epoch, model, val_dataloader, device, logger)
+    logger.save_model(model)
 
 
 if __name__ == "__main__":
-    with open("./cfg/simple_detector.yaml") as stream:
+    import yaml
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Training Engine")
+    parser.add_argument('--cfg', required=True)
+    args = parser.parse_args()
+    with open(args.cfg) as stream:
         cfg = yaml.safe_load(stream)
+    cfg["cfg_path"] = args.cfg
     train(cfg)

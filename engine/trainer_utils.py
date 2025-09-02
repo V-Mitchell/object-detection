@@ -1,17 +1,45 @@
 import os
+import shutil
+import logging
 import torch
 from torch.utils.tensorboard.writer import SummaryWriter
 from datetime import datetime
 
 
-class TensorboardLogger():
-    def __init__(self, base_log_path):
-        self.log_path = os.path.join(base_log_path, datetime.today().strftime("%Y-%m-%d-%H-%M-%S"))
+class TrainingLogger():
+    def __init__(self, base_log_path, log_name):
+        self.log_path = os.path.join(base_log_path, (log_name + "_" if log_name else "") +
+                                     datetime.today().strftime("%Y-%m-%d-%H-%M-%S"))
         self.writer = SummaryWriter(self.log_path)
+        self.log_dict_step = 0
 
-    def log_dict(self, data_dict, step):
+        self.cfg_dir_path = os.path.join(self.log_path, "cfg")
+        os.makedirs(self.cfg_dir_path)
+        self.weights_dir_path = os.path.join(self.log_path, "weights")
+        os.makedirs(self.weights_dir_path)
+        logging.basicConfig(filename=os.path.join(self.log_path, "session.log"),
+                            level=logging.INFO,
+                            format="%(asctime)s/%(levelname)s/%(message)s")
+        self.logger = logging.getLogger(__name__)
+
+    def log_dict(self, data_dict):
         for k, v in data_dict.items():
-            self.writer.add_scalar(k, v, step)
+            self.writer.add_scalar(k, v, self.log_dict_step)
+        self.log_dict_step += 1
+
+    def save_cfg(self, cfg_path):
+        shutil.copy(cfg_path, os.path.join(self.cfg_dir_path, os.path.basename(cfg_path)))
+
+    def save_checkpoint(self, epoch, model):
+        torch.save(model.state_dict(),
+                   os.path.join(self.weights_dir_path,
+                                str(epoch) + "_checkpoint.pth"))
+
+    def save_model(self, model):
+        torch.save(model.state_dict(), os.path.join(self.weights_dir_path, "image_classifier.pth"))
+
+    def log_message(self, msg_str):
+        self.logger.info(msg_str)
 
     def get_log_path(self):
         return self.log_path
@@ -51,17 +79,6 @@ def get_device(device="", batch_size=0, newline=True):
         s = s.rstrip()
     print(s)
     return torch.device(arg)
-
-
-def save_checkpoint(state_dict, epoch, save_path):
-    torch.save(state_dict, os.path.join(save_path, "checkpoint", "last.pt.tar"))
-
-
-def save_model(model_state_dict, epoch, save_path):
-    dir_path = os.path.join(save_path, "model")
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
-    torch.save(model_state_dict, os.path.join(dir_path, str(epoch) + ".pt"))
 
 
 def get_log_path():
