@@ -30,8 +30,21 @@ class BCELoss(nn.Module):
         Input: Class logits of shape [N, C] (input is unnormalized)
         Target: Target of shape [N, C]
         """
-        loss = F.binary_cross_entropy_with_logits(input, target.float(), reduction='none')
-        return loss.mean()
+        loss = F.binary_cross_entropy_with_logits(input, target.float(), reduction='mean')
+        return loss
+
+
+class CELoss(nn.Module):
+    def __init__(self):
+        super(CELoss, self).__init__()
+
+    def forward(self, input, target, weights=None):
+        """
+        Input: Class logits of shape [N, C] (input is unnormalized)
+        Target: Target of shape [N]
+        """
+        loss = F.cross_entropy(input, target, reduction="mean")
+        return loss
 
 
 if __name__ == "__main__":
@@ -49,14 +62,13 @@ if __name__ == "__main__":
     loss.backward()
     print("Loss:", loss, loss.shape)
 
-    print("\n\nTesting Binary Cross Entropy Loss")
-    bce_loss = BCELoss()
+    print("\n\nTesting Cross Entropy Loss")
+    ce_loss = CELoss()
 
     input = torch.randn((num_preds, num_classes), requires_grad=True)
     target = torch.randint(0, num_classes, (1, num_preds)).flatten()
-    target = F.one_hot(target, num_classes=num_classes)
     print("Input:", input, input.shape)
     print("Target:", target, target.shape)
-    loss = bce_loss(input, target)
+    loss = ce_loss(input, target)
     loss.backward()
     print("Loss:", loss, loss.shape)

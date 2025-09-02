@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.heads.proto_net import ProtoNet
 from models.assigner.assigner import TaskAlignedAssigner, SimOTAssigner
-from models.loss.class_loss import BCELoss, FocalLoss
+from models.loss.class_loss import CELoss, BCELoss
 from models.loss.bbox_loss import CIoULoss, GIoULoss
 from models.loss.mask_loss import DiceLoss
 
@@ -13,7 +13,6 @@ class AnchorlessHead(nn.Module):
                  num_classes,
                  input_channels=[64, 128, 256, 512],
                  num_prototypes=8,
-                 bg_index=0,
                  image_size=[640, 640]):
         super(AnchorlessHead, self).__init__()
         self.num_classes = num_classes
@@ -23,7 +22,7 @@ class AnchorlessHead(nn.Module):
 
         self.assigner = SimOTAssigner(num_classes, image_size)
 
-        self.cls_loss = FocalLoss()
+        self.cls_loss = CELoss()
         self.obj_loss = BCELoss()
         self.bbox_loss = GIoULoss()
         self.mask_loss = DiceLoss(sigmoid=False)
@@ -32,28 +31,12 @@ class AnchorlessHead(nn.Module):
         self.conv_obj = nn.ModuleList()
         self.conv_reg = nn.ModuleList()
         self.conv_coeff = nn.ModuleList()
-        self.relu = nn.ReLU()
         for ch in input_channels:
-            self.conv_cls.append(
-                nn.Sequential(*[
-                    nn.Conv2d(ch, num_classes, kernel_size=3, stride=1, padding=1),
-                    nn.BatchNorm2d(num_classes), self.relu
-                ]))
-            self.conv_obj.append(
-                nn.Sequential(*[
-                    nn.Conv2d(ch, 1, kernel_size=3, stride=1, padding=1),
-                    nn.BatchNorm2d(1), self.relu
-                ]))
-            self.conv_reg.append(
-                nn.Sequential(*[
-                    nn.Conv2d(ch, 4, kernel_size=3, stride=1, padding=1),
-                    nn.BatchNorm2d(4), self.relu
-                ]))
+            self.conv_cls.append(nn.Conv2d(ch, num_classes, kernel_size=3, stride=1, padding=1))
+            self.conv_obj.append(nn.Conv2d(ch, 1, kernel_size=3, stride=1, padding=1))
+            self.conv_reg.append(nn.Conv2d(ch, 4, kernel_size=3, stride=1, padding=1))
             self.conv_coeff.append(
-                nn.Sequential(*[
-                    nn.Conv2d(ch, num_prototypes, kernel_size=3, stride=1, padding=1),
-                    nn.BatchNorm2d(num_prototypes), self.relu
-                ]))
+                nn.Conv2d(ch, num_prototypes, kernel_size=3, stride=1, padding=1), )
 
     def forward(self, x):
         cls_preds = []
@@ -159,20 +142,20 @@ class AnchorlessHead(nn.Module):
 
             # we will only calculate the loss for positive matches between predictions and ground truths
             if matched_gt_idxs.dim() == 0:
-                cls_losses.append(self.cls_loss(cls_pred, assigned_cls).unsqueeze(0))
+                cls_losses.append(torch.zeros((1), dtype=torch.float, device=device))
                 obj_losses.append(self.obj_loss(obj_pred, assigned_obj).unsqueeze(0))
                 bbox_losses.append(torch.zeros((1), dtype=torch.float, device=device))
             else:
                 cls_losses.append(
-                    self.cls_loss(cls_pred[matched_fg_mask], assigned_cls).unsqueeze(0))
-                obj_losses.append(self.obj_loss(obj_pred, assigned_obj).unsqueeze(0))
+                    self.cls_loss(cls_pred[matched_fg_mask], assigned_cls.long()).unsqueeze(0))
+                obj_losses.append(
+                    self.obj_loss(obj_pred[matched_fg_mask], assigned_obj).unsqueeze(0))
                 bbox_losses.append(self.bbox_loss(bbox_pred[matched_fg_mask], assigned_bbox))
-                # mask_losses.append(self.mask_loss(mask_pred, mask_assign))
 
         loss = dict()
         loss["class"] = torch.cat(cls_losses, dim=0).mean()
         loss["obj"] = torch.cat(obj_losses, dim=0).mean()
-        loss["bbox"] = torch.cat(bbox_losses, dim=0).mean() * 5.0
+        loss["bbox"] = torch.cat(bbox_losses, dim=0).mean()
         # loss["mask"] = torch.cat(mask_losses, 0).mean()
         return loss
 
@@ -220,10 +203,6 @@ class DenseHead(nn.Module):
                       kernel_size=3,
                       stride=1,
                       padding=1))
-        # Normalize output
-        cls_convs.append(nn.Softmax(dim=1))
-        reg_convs.append(nn.Sigmoid())
-        coeff_convs.append(nn.Sigmoid())
 
         self.cls_layer = nn.Sequential(*cls_convs)
         self.reg_layer = nn.Sequential(*reg_convs)

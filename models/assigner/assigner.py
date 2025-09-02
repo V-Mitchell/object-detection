@@ -264,9 +264,11 @@ class SimOTAssigner(nn.Module):
         # obj loss over fg_mask using r2 as target.
         # i think this is the most coherent
 
-        assigned_cls = F.one_hot(cls_labels[matched_gt_idxs].to(torch.long) - 1, self.num_classes)
-        assigned_obj = torch.zeros_like(obj_preds, dtype=torch.float)
-        assigned_obj[matched_fg_mask] = 1.0
+        # assigned_cls = F.one_hot(cls_labels[matched_gt_idxs].to(torch.long) - 1, self.num_classes)
+        assigned_cls = cls_labels[matched_gt_idxs].to(torch.long) - 1
+        assigned_obj = torch.ones_like(obj_preds[matched_gt_idxs], dtype=torch.float)
+        # assigned_obj = torch.zeros_like(obj_preds, dtype=torch.float)
+        # assigned_obj[matched_fg_mask] = 1.0
         # assigned_obj = torch.where(matched_fg_mask, 1.0, 0.0).unsqueeze(-1).float()
         assigned_bbox = bbox_labels[matched_gt_idxs]
 
@@ -274,7 +276,7 @@ class SimOTAssigner(nn.Module):
 
 
 class NaiveAssigner(nn.Module):
-    def __init__(self, num_classes, image_size, bbox_bias=3.0):
+    def __init__(self, num_classes, image_size, bbox_bias=1.0):
         super(NaiveAssigner, self).__init__()
         self.num_classes = num_classes
         self.image_size = image_size

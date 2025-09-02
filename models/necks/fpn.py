@@ -7,7 +7,6 @@ class PANet(nn.Module):
     def __init__(self, expansion, input_channels=[64, 128, 256, 512]):
         super(PANet, self).__init__()
 
-        # pair each conv with batchnorm and activation ???
         self.relu = nn.ReLU()
         self.p0_lat_conv = nn.Sequential(*[
             nn.Conv2d(input_channels[0] * expansion + input_channels[1] * expansion,
@@ -87,20 +86,22 @@ class PANet(nn.Module):
         x0, x1, x2, x3 = feats
 
         p2_lat = torch.cat(
-            (x2, F.interpolate(x3, scale_factor=2, mode="bilinear", align_corners=True)), 1)
+            (x2, F.interpolate(x3, scale_factor=2, mode="bilinear", align_corners=True)), dim=1)
         p2_lat = self.p2_lat_conv1(p2_lat)
         p1_lat = torch.cat(
-            (x1, F.interpolate(p2_lat, scale_factor=2, mode="bilinear", align_corners=True)), 1)
+            (x1, F.interpolate(p2_lat, scale_factor=2, mode="bilinear", align_corners=True)),
+            dim=1)
         p1_lat = self.p1_lat_conv1(p1_lat)
         p0_lat = torch.cat(
-            (x0, F.interpolate(p1_lat, scale_factor=2, mode="bilinear", align_corners=True)), 1)
+            (x0, F.interpolate(p1_lat, scale_factor=2, mode="bilinear", align_corners=True)),
+            dim=1)
         p0 = self.p0_lat_conv(p0_lat)
 
-        p1_lat = torch.cat((p1_lat, self.p0_down_conv(p0)), 1)
+        p1_lat = torch.cat((p1_lat, self.p0_down_conv(p0)), dim=1)
         p1 = self.p1_lat_conv2(p1_lat)
-        p2_lat = torch.cat((p2_lat, self.p1_down_conv(p1)), 1)
+        p2_lat = torch.cat((p2_lat, self.p1_down_conv(p1)), dim=1)
         p2 = self.p2_lat_conv2(p2_lat)
-        p3_lat = torch.cat((x3, self.p2_down_conv(p2)), 1)
+        p3_lat = torch.cat((x3, self.p2_down_conv(p2)), dim=1)
         p3 = self.p3_lat_conv(p3_lat)
 
         return (p0, p1, p2, p3)

@@ -45,10 +45,20 @@ class BasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, first_block=False):
         super(BasicBlock, self).__init__()
 
-        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1)
+        self.conv0 = nn.Conv2d(in_channels,
+                               out_channels,
+                               kernel_size=3,
+                               stride=stride,
+                               padding=1,
+                               bias=True)
         self.bn0 = nn.BatchNorm2d(out_channels)
 
-        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(out_channels,
+                               out_channels,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                               bias=True)
         self.bn1 = nn.BatchNorm2d(out_channels)
 
         self.relu = nn.ReLU()
@@ -76,10 +86,15 @@ class ResNet(nn.Module):
                  num_channels=3):
         super(ResNet, self).__init__()
 
-        self.conv0 = nn.Sequential(
-            nn.Conv2d(num_channels, self.in_channels, kernel_size=7, stride=2, padding=3),
-            nn.BatchNorm2d(self.in_channels), nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        self.conv0 = nn.Conv2d(num_channels,
+                               self.in_channels,
+                               kernel_size=7,
+                               stride=2,
+                               padding=3,
+                               bias=True)
+        self.bn0 = nn.BatchNorm2d(self.in_channels)
+        self.relu = nn.ReLU()
+        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         self.layer0 = self.create_layer(ResBlock,
                                         blocks_list[0],
@@ -103,7 +118,9 @@ class ResNet(nn.Module):
                                         stride=2)
 
     def forward(self, x):
-        x0 = self.layer0(self.conv0(x))
+        x = self.relu(self.bn0(self.conv0(x)))
+        x = self.max_pool(x)
+        x0 = self.layer0(x)
         x1 = self.layer1(x0)
         x2 = self.layer2(x1)
         x3 = self.layer3(x2)
